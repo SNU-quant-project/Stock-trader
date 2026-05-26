@@ -1,0 +1,17 @@
+[Unit]
+Description=HMM Live Trading Bot (Alpaca Paper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/Stock-trader
+ExecStart=/home/ubuntu/Stock-trader/venv/bin/python live_trade.py --loop --execute
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

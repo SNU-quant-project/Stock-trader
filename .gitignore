@@ -7,6 +7,19 @@
 venv/
 .venv/
 
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 백테스트 결과 HTML
+*.html
+
+# 로그 & 결과물
+logs/
+results/
+
 # 데이터 파일 (스크립트로 직접 생성)
 *.csv
 *.parquet
