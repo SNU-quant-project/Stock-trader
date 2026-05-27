@@ -6,3 +6,5 @@ lxml
 pyarrow
 matplotlib
 requests
+streamlit
+plotly

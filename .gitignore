@@ -21,3 +21,10 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Bot 실행 로그
+bot/logs/
