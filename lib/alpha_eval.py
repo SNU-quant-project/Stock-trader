@@ -43,6 +43,20 @@ def build_namespace(panel, fundamentals, sector_series):
             index=dates, columns=symbols, dtype=float,
         )
 
+    # === 가격에 따라 매일 변하는 derived fundamentals ===
+    # Brain 의 cap 은 daily 시총 = shares × close. 분기 발표 fundamental 과 daily 가격 결합.
+    if "shares" in fund_broadcast:
+        shares_df = fund_broadcast["shares"]
+        fund_broadcast["cap"] = shares_df * close
+        # pe, pb, ps 도 가격에 따라 매일 변하는 비율
+        if "eps" in fund_broadcast:
+            fund_broadcast["pe"] = close / fund_broadcast["eps"].replace(0, np.nan)
+        if "book_value" in fund_broadcast:
+            fund_broadcast["pb"] = close / fund_broadcast["book_value"].replace(0, np.nan)
+        if "revenue" in fund_broadcast:
+            # P/S = market_cap / revenue
+            fund_broadcast["ps"] = (shares_df * close) / fund_broadcast["revenue"].replace(0, np.nan)
+
     # === Sector group (Series, index=symbol) ===
     sector_aligned = sector_series.reindex(symbols).fillna("Unknown")
 
