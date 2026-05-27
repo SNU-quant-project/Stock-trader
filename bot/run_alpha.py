@@ -99,28 +99,44 @@ def compute_today_weights(panel, sector_map):
 
 # === 4. 목표 포지션 ↔ 주문 ===
 
-def get_target_shares(weights, equity, latest_prices):
+MIN_QTY = 1e-4  # 이보다 작은 절댓값은 주문 안 함
+
+
+def get_target_shares(weights, equity, latest_prices, fractional=True):
+    """목표 주식 수.
+
+    Alpaca 제약: fractional 은 long 만 가능, short 는 정수만 허용.
+    - long  (w > 0): fractional=True 면 소수점 4자리
+    - short (w < 0): 항상 정수 (truncate toward 0)
+    """
     shares = {}
     for sym, w in weights.items():
         price = latest_prices.get(sym)
         if not price or price <= 0:
             continue
         target_dollar = equity * w
-        n = int(target_dollar / price)  # 음수면 short
-        if n != 0:
+        if target_dollar > 0 and fractional:
+            n = round(target_dollar / price, 4)
+        else:
+            n = int(target_dollar / price)
+        if abs(n) >= MIN_QTY:
             shares[sym] = n
     return shares
 
 
 def get_current_positions(trading):
-    return {p.symbol: int(float(p.qty)) for p in trading.get_all_positions()}
+    return {p.symbol: float(p.qty) for p in trading.get_all_positions()}
 
 
 def reconcile(target, current):
-    """target - current = 거래해야 할 주식 수."""
+    """target - current = 거래해야 할 주식 수. 너무 작은 차이는 무시."""
     all_syms = set(target) | set(current)
-    return {s: target.get(s, 0) - current.get(s, 0)
-            for s in all_syms if target.get(s, 0) - current.get(s, 0) != 0}
+    out = {}
+    for s in all_syms:
+        diff = target.get(s, 0) - current.get(s, 0)
+        if abs(diff) >= MIN_QTY:
+            out[s] = round(diff, 4)
+    return out
 
 
 def submit_orders(trading, orders, dry_run=False):
