@@ -385,49 +385,101 @@ with tab_ord:
                 st.cache_data.clear()
                 st.rerun()
         with col_b:
-            st.caption("개별 종목 옆 ✕ 버튼으로 한 건씩 취소도 가능합니다.")
+            st.caption("비중 = qty × 최신 close 가격 기준 (cost basis).")
+
+        # 최신 close 가격 로드 (캐시 가능)
+        @st.cache_data(ttl=300)
+        def _latest_prices():
+            try:
+                panel_df = pd.read_parquet(ROOT / "data" / "sp500_panel.parquet")
+                close = panel_df["close"].unstack(level="symbol")
+                return close.iloc[-1].to_dict()
+            except Exception:
+                return {}
+        prices = _latest_prices()
 
         cmap = load_company_map()
         rows = []
         for o in open_orders:
-            info = cmap.get(o.symbol, {"name": o.symbol, "sector": "Unknown"})
+            sym = o.symbol
+            qty = float(o.qty) if o.qty else 0.0
+            side = (o.side.value if hasattr(o.side, "value") else str(o.side)).lower()
+            px = prices.get(sym, 0)
+            cost = qty * px
+            info = cmap.get(sym, {"name": sym, "sector": "Unknown"})
             rows.append({
-                "id": str(o.id),
-                "symbol": o.symbol,
-                "name": info["name"],
-                "side": o.side.value if hasattr(o.side, "value") else str(o.side),
-                "qty": float(o.qty) if o.qty else 0.0,
-                "status": o.status.value if hasattr(o.status, "value") else str(o.status),
-                "submitted_at": str(o.submitted_at)[:19] if o.submitted_at else "",
+                "symbol": sym, "name": info["name"], "sector": info["sector"],
+                "side": side, "qty": qty, "price": px, "cost": cost,
             })
-        ord_df = pd.DataFrame(rows).sort_values(["side", "symbol"])
+        ord_df = pd.DataFrame(rows)
 
-        # 표 직접 HTML 로 (개별 cancel 버튼 행렬은 streamlit 에서 어려우니 일단 표만)
-        header = (
-            f'<tr style="border-bottom:2px solid #ddd; text-align:left; font-size:12px;">'
-            f'<th>Symbol</th><th>Company</th><th>Side</th>'
-            f'<th style="text-align:right;">Qty</th>'
-            f'<th>Status</th><th>Submitted</th></tr>'
-        )
-        body = ""
-        for _, r in ord_df.iterrows():
-            side_color = "#2ecc71" if r["side"] == "buy" else "#e74c3c"
-            url = yahoo_url(r["symbol"])
-            body += (
-                f'<tr style="border-bottom:1px solid #eee; font-size:13px;">'
-                f'<td><b>{r["symbol"]}</b></td>'
-                f'<td><a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;">{r["name"]}</a></td>'
-                f'<td style="color:{side_color}; font-weight:600;">{r["side"].upper()}</td>'
-                f'<td style="text-align:right;">{r["qty"]:.4f}</td>'
-                f'<td style="color:#888;">{r["status"]}</td>'
-                f'<td style="color:#888; font-size:12px;">{r["submitted_at"]}</td>'
-                f'</tr>'
+        longs = ord_df[ord_df["side"] == "buy"].copy()
+        shorts = ord_df[ord_df["side"] == "sell"].copy()
+
+        def _render_side(df, title, color):
+            if df.empty:
+                st.markdown(f"#### {title}")
+                st.info(f"{title} 주문 없음.")
+                return
+
+            total = df["cost"].sum()
+            df = df.copy()
+            df["weight"] = df["cost"] / total if total > 0 else 0
+            df = df.sort_values("cost", ascending=False)
+
+            # Top 10 + Others
+            top = df.head(10)
+            rest_cost = df["cost"].iloc[10:].sum()
+            labels = list(top["symbol"]) + (["Others"] if rest_cost > 0 else [])
+            values = list(top["cost"]) + ([rest_cost] if rest_cost > 0 else [])
+
+            st.markdown(f"#### {title} ({len(df)}종목, 총 ${total:,.0f})")
+
+            fig = go.Figure(go.Pie(
+                labels=labels, values=values, hole=0.45,
+                marker=dict(line=dict(color="white", width=1.5)),
+                textinfo="label+percent", textposition="inside",
+                sort=False,
+            ))
+            fig.update_layout(
+                height=320, margin=dict(l=0, r=0, t=10, b=0),
+                showlegend=False,
             )
-        st.markdown(
-            f'<table style="width:100%; border-collapse:collapse;">'
-            f'<thead>{header}</thead><tbody>{body}</tbody></table>',
-            unsafe_allow_html=True,
-        )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Top 10 table
+            st.markdown("**Top 10 종목**")
+            tb_rows = ""
+            for _, r in top.iterrows():
+                url = yahoo_url(r["symbol"])
+                tb_rows += (
+                    f'<tr style="border-bottom:1px solid #eee; font-size:13px;">'
+                    f'<td><b>{r["symbol"]}</b></td>'
+                    f'<td><a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;">{r["name"]}</a></td>'
+                    f'<td style="color:#888;">{r["sector"]}</td>'
+                    f'<td style="text-align:right;">{r["qty"]:.4f}</td>'
+                    f'<td style="text-align:right;">${r["cost"]:,.0f}</td>'
+                    f'<td style="text-align:right; color:{color}; font-weight:600;">{r["weight"]*100:.2f}%</td>'
+                    f'</tr>'
+                )
+            header = (
+                '<tr style="border-bottom:2px solid #ddd; text-align:left; font-size:12px;">'
+                '<th>Symbol</th><th>Company</th><th>Sector</th>'
+                '<th style="text-align:right;">Qty</th>'
+                '<th style="text-align:right;">Cost</th>'
+                '<th style="text-align:right;">Weight</th></tr>'
+            )
+            st.markdown(
+                f'<table style="width:100%; border-collapse:collapse;">'
+                f'<thead>{header}</thead><tbody>{tb_rows}</tbody></table>',
+                unsafe_allow_html=True,
+            )
+
+        col_l, col_s = st.columns(2)
+        with col_l:
+            _render_side(longs, "🟢 Long (BUY)", "#2ecc71")
+        with col_s:
+            _render_side(shorts, "🔴 Short (SELL)", "#e74c3c")
 
 with tab1:
     pos_df = state["positions"]
