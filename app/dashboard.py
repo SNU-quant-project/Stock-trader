@@ -128,6 +128,33 @@ def render_weight_table(items, company_map):
     st.markdown(html, unsafe_allow_html=True)
 
 
+@st.cache_data(ttl=30)
+def fetch_open_orders():
+    """현재 미체결 (open) 주문 목록."""
+    from alpaca.trading.requests import GetOrdersRequest
+    from alpaca.trading.enums import QueryOrderStatus
+    tc = get_trading_client()
+    req = GetOrdersRequest(status=QueryOrderStatus.OPEN, limit=500)
+    return list(tc.get_orders(filter=req))
+
+
+def cancel_all_open_orders():
+    """모든 open 주문 취소. (취소 시도 수, 에러 수) 반환."""
+    tc = get_trading_client()
+    try:
+        results = tc.cancel_orders()
+        return len(results), 0
+    except Exception:
+        opens = fetch_open_orders()
+        errs = 0
+        for o in opens:
+            try:
+                tc.cancel_order_by_id(o.id)
+            except Exception:
+                errs += 1
+        return len(opens), errs
+
+
 @st.cache_data(ttl=60)
 def fetch_account_state():
     tc = get_trading_client()
@@ -240,11 +267,22 @@ cash = state["cash"]
 last_equity = state["last_equity"]
 daily_return = (equity - last_equity) / last_equity if last_equity else 0
 
-c1, c2, c3, c4 = st.columns(4)
+open_orders = fetch_open_orders()
+n_open = len(open_orders)
+
+c1, c2, c3, c4, c5 = st.columns([1.2, 1, 1, 1, 1.2])
 c1.metric("Equity", f"${equity:,.2f}", f"{daily_return:+.2%} (vs prev close)")
 c2.metric("Cash", f"${cash:,.2f}")
 c3.metric("Positions", len(state["positions"]) if not state["positions"].empty else 0)
-c4.metric("Status", state["status"])
+c4.metric("Open Orders", n_open)
+with c5:
+    st.metric("Status", state["status"])
+    if n_open > 0:
+        if st.button(f"🚫 Cancel {n_open} open", use_container_width=True):
+            n, errs = cancel_all_open_orders()
+            st.success(f"취소 요청: {n}건, 실패: {errs}건")
+            st.cache_data.clear()
+            st.rerun()
 
 # === 자산 차트 ===
 header_col, period_col = st.columns([3, 2])
@@ -310,11 +348,36 @@ with tab1:
         render_position_table(shorts, "short")
 
 with tab2:
-    st.markdown("Brain 스타일 expression 으로 알파를 작성하면 봇이 다음 실행 때 그대로 적용합니다.")
-
     s = cfg.get("settings", {})
+
+    # === (1) Currently Applied Alpha — read-only Brain-style card ===
+    import html as _html
+    expr_display = _html.escape(cfg.get("expression", ""))
+    applied_html = (
+        f'<div style="border:1px solid #2a9d8f; border-radius:6px; padding:14px 18px; margin-bottom:18px; background:#f0fafa;">'
+        f'<div style="font-size:12px; color:#2a9d8f; font-weight:600; letter-spacing:1px; margin-bottom:8px;">✓ CURRENTLY APPLIED ALPHA</div>'
+        f'<div style="background:#1e1e1e; color:#d4d4d4; padding:14px 18px; border-radius:4px; '
+        f'font-family:Consolas,Menlo,monospace; font-size:13px; line-height:1.6; white-space:pre-wrap; '
+        f'word-break:break-word; margin-bottom:10px;">{expr_display}</div>'
+        f'<div style="font-size:12px; color:#555;">'
+        f'<b>Neutralization</b>: {s.get("neutralization","-")} &nbsp;·&nbsp; '
+        f'<b>Decay</b>: {s.get("decay",0)} &nbsp;·&nbsp; '
+        f'<b>Truncation</b>: {s.get("truncation",0)} &nbsp;·&nbsp; '
+        f'<b>Delay</b>: {s.get("delay",1)}'
+        f'</div>'
+    )
+    if cfg.get("description"):
+        applied_html += f'<div style="font-size:12px; color:#777; margin-top:6px;">{_html.escape(cfg["description"])}</div>'
+    applied_html += '</div>'
+    st.markdown(applied_html, unsafe_allow_html=True)
+    st.caption("위는 봇이 실제로 매일 돌리는 알파. 아래 폼에서 수정 후 Save 를 누르면 다음 실행부터 반영됩니다.")
+    st.divider()
+
+    # === (2) Edit Form ===
+    st.markdown("### ✏️ Edit Alpha")
+    NEUT_OPTIONS = ["Sector", "Cap Bucket", "Sector + Cap Bucket", "Market", "None"]
     with st.form("alpha_form"):
-        st.markdown("### Code")
+        st.markdown("**Code**")
         new_expr = st.text_area(
             "Expression",
             value=cfg.get("expression", "rank(-returns)"),
@@ -323,14 +386,15 @@ with tab2:
             help="Brain Fast Expression 문법. 예: group_neutralize(rank(-returns), sector)",
         )
 
-        st.markdown("### Simulation Settings")
+        st.markdown("**Simulation Settings**")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
+            current_neut = s.get("neutralization", "Sector")
             new_neut = st.selectbox(
                 "Neutralization",
-                ["Sector", "Market", "None"],
-                index=["Sector", "Market", "None"].index(s.get("neutralization", "Sector")),
-                help="식 평가 후 추가로 적용할 중립화. 식 안에 group_neutralize 가 이미 있으면 None 권장.",
+                NEUT_OPTIONS,
+                index=NEUT_OPTIONS.index(current_neut) if current_neut in NEUT_OPTIONS else 0,
+                help="식 평가 후 추가로 적용할 중립화. Cap Bucket = 시총 10분위 중립, Sector + Cap Bucket = 둘 다.",
             )
         with col2:
             new_decay = st.number_input(
@@ -443,6 +507,10 @@ rank(fcf / cap)
 
 with tab3:
     st.markdown("### 최근 봇 실행 로그")
+    st.caption(
+        "🟡 **DRY-RUN**: 사이트 / 터미널에서 `--dry-run` 으로 돌린 시뮬레이션. **실제 주문 들어가지 않음**.  \n"
+        "🟢 **LIVE**: cron (매일 06:05 KST) 또는 봇 직접 실행으로 **실제 주문 제출됨**."
+    )
     logs = load_recent_logs(10)
     if not logs:
         st.info("아직 실행 로그가 없습니다.")
@@ -452,13 +520,35 @@ with tab3:
             n_orders = len(log.get("orders", {}))
             n_subm = len(log.get("submitted", []))
             n_fail = len(log.get("failed", []))
-            dry = "DRY" if log.get("dry_run") else "LIVE"
-            with st.expander(f"{ts}  [{dry}]  주문 {n_orders}건 (제출 {n_subm}, 실패 {n_fail})"):
-                summary_cols = st.columns(4)
+            is_dry = bool(log.get("dry_run"))
+            if is_dry:
+                label = f"🟡 DRY-RUN  ·  {ts}  ·  시뮬레이션 {n_orders}건  (실제 주문 X)"
+            else:
+                label = f"🟢 LIVE  ·  {ts}  ·  주문 {n_orders}건 제출됨 (성공 {n_subm}, 실패 {n_fail})"
+            with st.expander(label):
+                # 상단 줄 — 모드 강조
+                mode_bg = "#fff8e1" if is_dry else "#e8f5e9"
+                mode_color = "#f57c00" if is_dry else "#2e7d32"
+                mode_text = "DRY-RUN (시뮬레이션만, Alpaca 에 주문 들어가지 않음)" if is_dry else "LIVE (Alpaca 에 실제 주문 제출)"
+                st.markdown(
+                    f'<div style="background:{mode_bg}; color:{mode_color}; padding:8px 12px; '
+                    f'border-radius:4px; font-size:13px; margin-bottom:10px;"><b>Mode:</b> {mode_text}</div>',
+                    unsafe_allow_html=True,
+                )
+
+                summary_cols = st.columns(5)
                 summary_cols[0].metric("Equity", f"${log.get('equity', 0):,.0f}")
                 summary_cols[1].metric("Universe", log.get("universe_size", 0))
                 summary_cols[2].metric("Panel last", log.get("panel_last_date", "-"))
                 summary_cols[3].metric("Orders", n_orders)
+                summary_cols[4].metric("Submitted" if not is_dry else "Simulated", n_subm if not is_dry else n_orders)
+
+                # 알파 식 / 세팅도 같이 보여주기
+                if log.get("expression"):
+                    st.caption(f"**식**: `{log['expression']}`")
+                if log.get("settings"):
+                    s = log["settings"]
+                    st.caption(f"**세팅**: Neut={s.get('neutralization')}, Decay={s.get('decay')}, Trunc={s.get('truncation')}, Delay={s.get('delay')}")
 
                 weights = log.get("weights", {})
                 if weights:

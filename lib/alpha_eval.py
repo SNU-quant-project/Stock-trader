@@ -89,10 +89,26 @@ def evaluate(expression, panel, fundamentals, sector_map, settings=None):
     if not isinstance(raw, pd.DataFrame):
         raise ValueError(f"식 결과가 DataFrame 이 아님: {type(raw).__name__}")
 
-    # === 2. Neutralization (식 안에 group_neutralize 가 있으면 중복 가능) ===
+    # === 2. Neutralization ===
     neut = settings.get("neutralization", "Sector")
+
+    def _cap_bucket():
+        cap = ns.get("cap")
+        if isinstance(cap, pd.DataFrame) and not cap.empty:
+            return ops.bucket(ops.rank(cap), range="0,1,0.1")
+        return None
+
     if neut == "Sector":
         raw = ops.group_neutralize(raw, sector_series)
+    elif neut == "Cap Bucket":
+        cb = _cap_bucket()
+        if cb is not None:
+            raw = ops.group_neutralize(raw, cb)
+    elif neut == "Sector + Cap Bucket":
+        raw = ops.group_neutralize(raw, sector_series)
+        cb = _cap_bucket()
+        if cb is not None:
+            raw = ops.group_neutralize(raw, cb)
     elif neut == "Market":
         raw = raw.sub(raw.mean(axis=1), axis=0)
     # None → 그대로
