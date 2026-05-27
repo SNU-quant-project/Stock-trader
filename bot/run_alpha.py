@@ -124,6 +124,21 @@ def get_current_positions(trading):
     return {p.symbol: float(p.qty) for p in trading.get_all_positions()}
 
 
+def get_current_positions_detailed(trading):
+    """포지션 + 종목별 PnL 정보. Performance 추적용 로그."""
+    out = {}
+    for p in trading.get_all_positions():
+        out[p.symbol] = {
+            "qty": float(p.qty),
+            "avg_entry": float(p.avg_entry_price),
+            "current_price": float(p.current_price) if p.current_price else None,
+            "market_value": float(p.market_value),
+            "unrealized_pl": float(p.unrealized_pl),
+            "unrealized_plpc": float(p.unrealized_plpc),
+        }
+    return out
+
+
 def reconcile(target, current):
     """target - current = 거래해야 할 주식 수. 너무 작은 차이는 무시."""
     all_syms = set(target) | set(current)
@@ -244,6 +259,12 @@ def main(dry_run=False):
 
     print(f"=== 완료: 제출 {len(submitted)}, 실패 {len(failed)} (사전 취소 {cancelled_n}) ===")
 
+    # 실행 후 detailed positions snapshot (Performance 추적용)
+    try:
+        positions_after = get_current_positions_detailed(trading)
+    except Exception:
+        positions_after = {}
+
     write_log({
         "started_at": started_at.isoformat(),
         "dry_run": dry_run,
@@ -255,6 +276,7 @@ def main(dry_run=False):
         "weights": {k: float(v) for k, v in weights.items()},
         "target_shares": target,
         "current_positions": current,
+        "positions_after": positions_after,
         "orders": orders,
         "pre_cancelled": cancelled_n,
         "submitted": submitted,

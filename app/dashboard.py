@@ -370,7 +370,9 @@ else:
     st.caption(f"시작 ${base:,.2f} → 현재 ${equity:,.2f}  ({total_return:+.2%})")
 
 # === 탭: 포지션 / 알파 코드 / 로그 ===
-tab1, tab_ord, tab2, tab_bt, tab3 = st.tabs(["Positions", "Orders", "Alpha Code", "Backtest", "Bot Logs"])
+tab1, tab_ord, tab_perf, tab2, tab_bt, tab3 = st.tabs(
+    ["Positions", "Orders", "Performance", "Alpha Code", "Backtest", "Bot Logs"]
+)
 
 with tab_ord:
     st.markdown(f"### 현재 Open Orders ({n_open}건)")
@@ -804,6 +806,175 @@ with tab_bt:
                 showlegend=False,
             )
             st.plotly_chart(fig2, use_container_width=True)
+
+
+with tab_perf:
+    st.markdown("### 포트폴리오 성과 상세")
+    st.caption("Alpaca 페이퍼 계좌의 실거래 성과. 봇 로그에 시점별 종목 PnL 도 누적됩니다.")
+
+    # === 1. 일별 수익률 + 잔고 변화 ===
+    st.markdown("#### 📅 일별 수익률 & 잔고")
+    p_col1, p_col2 = st.columns([1, 4])
+    with p_col1:
+        perf_period = st.selectbox(
+            "기간", ["1W", "1M", "3M", "1Y", "all"], index=1, key="perf_period",
+        )
+
+    hist, err = fetch_portfolio_history(period=perf_period)
+    if err or hist is None or hist.empty:
+        st.info("아직 거래일 데이터가 부족합니다.")
+    else:
+        # 일별 변화 계산
+        h = hist.copy()
+        h["date"] = h["timestamp"].dt.date
+        h["daily_pl"] = h["equity"].diff()
+        h["daily_ret"] = h["equity"].pct_change()
+        h["cum_ret"] = h["equity"] / h["equity"].iloc[0] - 1
+        h = h.iloc[::-1]  # 최근 날짜부터
+
+        # 표
+        rows = ""
+        for _, r in h.iterrows():
+            pl = r["daily_pl"] if pd.notna(r["daily_pl"]) else 0
+            ret = r["daily_ret"] if pd.notna(r["daily_ret"]) else 0
+            cum = r["cum_ret"] if pd.notna(r["cum_ret"]) else 0
+            pl_color = "#2ecc71" if pl >= 0 else "#e74c3c"
+            ret_color = "#2ecc71" if ret >= 0 else "#e74c3c"
+            cum_color = "#2ecc71" if cum >= 0 else "#e74c3c"
+            rows += (
+                f'<tr style="border-bottom:1px solid #eee; font-size:13px;">'
+                f'<td>{r["date"]}</td>'
+                f'<td style="text-align:right;">${r["equity"]:,.2f}</td>'
+                f'<td style="text-align:right; color:{pl_color};">${pl:+,.2f}</td>'
+                f'<td style="text-align:right; color:{ret_color};">{ret*100:+.3f}%</td>'
+                f'<td style="text-align:right; color:{cum_color};">{cum*100:+.2f}%</td>'
+                f'</tr>'
+            )
+        header = (
+            '<tr style="border-bottom:2px solid #ddd; font-size:12px; text-align:left;">'
+            '<th>Date</th>'
+            '<th style="text-align:right;">Equity</th>'
+            '<th style="text-align:right;">Daily P&L</th>'
+            '<th style="text-align:right;">Daily Return</th>'
+            '<th style="text-align:right;">Cum Return</th>'
+            '</tr>'
+        )
+        st.markdown(
+            f'<table style="width:100%; border-collapse:collapse;">'
+            f'<thead>{header}</thead><tbody>{rows}</tbody></table>',
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
+
+    # === 2. 종목별 Winners / Losers (현재 포지션 기준 unrealized) ===
+    st.markdown("#### 🏆 종목별 손익 (현재 보유 기준 — 미실현 손익)")
+    pos_df = state["positions"]
+    if pos_df.empty:
+        st.info("현재 보유 포지션이 없습니다. 봇이 거래를 시작하면 채워집니다.")
+    else:
+        winners = pos_df.sort_values("unrealized_pl", ascending=False).head(10)
+        losers = pos_df.sort_values("unrealized_pl", ascending=True).head(10)
+
+        def _render_pnl_table(df, title, color):
+            st.markdown(f"**{title}**")
+            rows = ""
+            for _, r in df.iterrows():
+                url = yahoo_url(r["symbol"])
+                pl = r["unrealized_pl"]
+                plpc = r["unrealized_plpc"] * 100
+                rows += (
+                    f'<tr style="border-bottom:1px solid #eee; font-size:13px;">'
+                    f'<td><b>{r["symbol"]}</b></td>'
+                    f'<td><a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;">{r["name"]}</a></td>'
+                    f'<td style="color:#888;">{r["sector"]}</td>'
+                    f'<td style="text-align:right;">{r["qty"]:.4f}</td>'
+                    f'<td style="text-align:right;">${r["market_value"]:,.0f}</td>'
+                    f'<td style="text-align:right; color:{color}; font-weight:600;">${pl:+,.2f}</td>'
+                    f'<td style="text-align:right; color:{color};">{plpc:+.2f}%</td>'
+                    f'</tr>'
+                )
+            header = (
+                '<tr style="border-bottom:2px solid #ddd; font-size:12px; text-align:left;">'
+                '<th>Symbol</th><th>Company</th><th>Sector</th>'
+                '<th style="text-align:right;">Qty</th>'
+                '<th style="text-align:right;">Value</th>'
+                '<th style="text-align:right;">P&L ($)</th>'
+                '<th style="text-align:right;">P&L (%)</th>'
+                '</tr>'
+            )
+            st.markdown(
+                f'<table style="width:100%; border-collapse:collapse;">'
+                f'<thead>{header}</thead><tbody>{rows}</tbody></table>',
+                unsafe_allow_html=True,
+            )
+
+        col_w, col_l = st.columns(2)
+        with col_w:
+            _render_pnl_table(winners, "🟢 Top 10 Winners", "#2ecc71")
+        with col_l:
+            _render_pnl_table(losers, "🔴 Top 10 Losers", "#e74c3c")
+
+    st.divider()
+
+    # === 3. 봇 로그 기반 시점별 종목 PnL 히스토리 ===
+    st.markdown("#### 📈 종목별 누적 PnL (봇 실행 기록 기준)")
+    st.caption("매 봇 실행 시 그 시점의 unrealized PnL 을 기록. 시간이 지날수록 더 풍부해집니다.")
+
+    log_records = load_recent_logs(50)
+    pnl_history = []  # (date, symbol, unrealized_pl)
+    for _, log in log_records:
+        ts = pd.to_datetime(log.get("started_at"))
+        for sym, info in (log.get("positions_after") or {}).items():
+            if isinstance(info, dict):
+                pnl_history.append({
+                    "ts": ts,
+                    "symbol": sym,
+                    "unrealized_pl": info.get("unrealized_pl", 0),
+                })
+
+    if not pnl_history:
+        st.info("아직 시점별 PnL 기록이 없습니다. 봇이 한 번 이상 LIVE 로 실행되어야 합니다.")
+    else:
+        pnl_df = pd.DataFrame(pnl_history)
+        # 종목별 최신 ts 기준 PnL 집계
+        latest_by_sym = pnl_df.sort_values("ts").groupby("symbol").last()["unrealized_pl"].sort_values()
+
+        cmap = load_company_map()
+
+        top_winners = latest_by_sym.tail(10)[::-1]
+        top_losers = latest_by_sym.head(10)
+
+        def _render_simple(series, title, color):
+            st.markdown(f"**{title}**")
+            rows = ""
+            for sym, pl in series.items():
+                info = cmap.get(sym, {"name": sym, "sector": "Unknown"})
+                url = yahoo_url(sym)
+                rows += (
+                    f'<tr style="border-bottom:1px solid #eee; font-size:13px;">'
+                    f'<td><b>{sym}</b></td>'
+                    f'<td><a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;">{info["name"]}</a></td>'
+                    f'<td style="color:#888;">{info["sector"]}</td>'
+                    f'<td style="text-align:right; color:{color}; font-weight:600;">${pl:+,.2f}</td>'
+                    f'</tr>'
+                )
+            header = (
+                '<tr style="border-bottom:2px solid #ddd; font-size:12px; text-align:left;">'
+                '<th>Symbol</th><th>Company</th><th>Sector</th>'
+                '<th style="text-align:right;">최신 PnL</th></tr>'
+            )
+            st.markdown(
+                f'<table style="width:100%; border-collapse:collapse;">'
+                f'<thead>{header}</thead><tbody>{rows}</tbody></table>',
+                unsafe_allow_html=True,
+            )
+
+        c_w2, c_l2 = st.columns(2)
+        with c_w2:
+            _render_simple(top_winners, "🟢 누적 Winners", "#2ecc71")
+        with c_l2:
+            _render_simple(top_losers, "🔴 누적 Losers", "#e74c3c")
 
 
 with tab3:
