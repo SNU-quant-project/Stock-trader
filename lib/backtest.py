@@ -41,8 +41,11 @@ def run_backtest(weights, panel, delay=1):
     """
     close = panel["close"].unstack(level="symbol")
     open_ = panel["open"].unstack(level="symbol")
-    close.index = close.index.normalize()
-    open_.index = open_.index.normalize()
+    for df in (close, open_):
+        idx = df.index.normalize()
+        if hasattr(idx, "tz") and idx.tz is not None:
+            idx = idx.tz_localize(None)
+        df.index = idx
 
     # delay 적용: t close 정보로 계산된 알파 → t+delay 시가 진입
     if delay > 0:

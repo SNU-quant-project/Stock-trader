@@ -18,6 +18,46 @@ from . import operators as ops
 
 # ========== 평가 ==========
 
+REPORT_LAG_DAYS = 45  # 분기 종료 후 10-Q 발표까지의 보수적 lag
+
+
+def _build_pit_fundamentals(fundamentals, dates, symbols, lag_days=REPORT_LAG_DAYS):
+    """분기별 (symbol, quarter_end) → 거래일별 PIT (date × symbol) per field.
+
+    각 거래일 t 에 대해 quarter_end + lag_days ≤ t 를 만족하는 가장 최근 분기 데이터 사용.
+    merge_asof 로 종목별 vectorized.
+
+    fundamentals: MultiIndex DataFrame (symbol, quarter_end) → fields
+    반환: dict[field_name] -> DataFrame(date × symbol)
+    """
+    if fundamentals is None or fundamentals.empty:
+        return {}
+
+    qdf = fundamentals.reset_index()
+    qdf["available"] = qdf["quarter_end"] + pd.Timedelta(days=lag_days)
+    qdf = qdf.sort_values("available").reset_index(drop=True)
+
+    # 거래일 × 종목 매트릭스 — merge_asof 는 left_on (date) 기준 정렬 필요
+    date_sym = pd.MultiIndex.from_product(
+        [dates, symbols], names=["date", "symbol"]
+    ).to_frame(index=False).sort_values("date").reset_index(drop=True)
+
+    merged = pd.merge_asof(
+        date_sym, qdf,
+        left_on="date", right_on="available",
+        by="symbol",
+        direction="backward",
+    )
+
+    fields = [c for c in fundamentals.columns]
+    result = {}
+    for field in fields:
+        wide = merged.pivot(index="date", columns="symbol", values=field)
+        wide = wide.reindex(index=dates, columns=symbols)
+        result[field] = wide.astype(float)
+    return result
+
+
 def build_namespace(panel, fundamentals, sector_series):
     """eval 에 넘길 변수 namespace 만들기."""
     close = panel["close"].unstack(level="symbol")
@@ -28,34 +68,37 @@ def build_namespace(panel, fundamentals, sector_series):
 
     # 인덱스를 date 로 (timezone 제거)
     for df in (close, open_, high, low, volume):
-        df.index = df.index.normalize()
+        idx = df.index.normalize()
+        if hasattr(idx, "tz") and idx.tz is not None:
+            idx = idx.tz_localize(None)
+        df.index = idx
 
     dates = close.index
     symbols = close.columns
 
-    # === Fundamental: 모든 날짜에 같은 값으로 broadcast ===
-    fund_broadcast = {}
-    fundamentals_aligned = fundamentals.reindex(symbols)
-    for col in fundamentals_aligned.columns:
-        row = fundamentals_aligned[col]
-        fund_broadcast[col] = pd.DataFrame(
-            np.tile(row.values, (len(dates), 1)),
-            index=dates, columns=symbols, dtype=float,
-        )
+    # === Fundamental: 분기별 시계열 → PIT (각 거래일에 그 시점 발표된 가장 최근 분기) ===
+    fund_broadcast = _build_pit_fundamentals(fundamentals, dates, symbols)
 
     # === 가격에 따라 매일 변하는 derived fundamentals ===
-    # Brain 의 cap 은 daily 시총 = shares × close. 분기 발표 fundamental 과 daily 가격 결합.
     if "shares" in fund_broadcast:
         shares_df = fund_broadcast["shares"]
         fund_broadcast["cap"] = shares_df * close
-        # pe, pb, ps 도 가격에 따라 매일 변하는 비율
         if "eps" in fund_broadcast:
             fund_broadcast["pe"] = close / fund_broadcast["eps"].replace(0, np.nan)
-        if "book_value" in fund_broadcast:
-            fund_broadcast["pb"] = close / fund_broadcast["book_value"].replace(0, np.nan)
+        if "equity" in fund_broadcast:
+            # book_value per share = equity / shares → pb = close / (equity/shares)
+            bps = fund_broadcast["equity"] / shares_df.replace(0, np.nan)
+            fund_broadcast["book_value"] = bps
+            fund_broadcast["pb"] = close / bps.replace(0, np.nan)
         if "revenue" in fund_broadcast:
-            # P/S = market_cap / revenue
             fund_broadcast["ps"] = (shares_df * close) / fund_broadcast["revenue"].replace(0, np.nan)
+        if "ni" in fund_broadcast:
+            # ROE = NI / equity
+            if "equity" in fund_broadcast:
+                fund_broadcast["roe"] = fund_broadcast["ni"] / fund_broadcast["equity"].replace(0, np.nan)
+        if "assets" in fund_broadcast:
+            if "ni" in fund_broadcast:
+                fund_broadcast["roa"] = fund_broadcast["ni"] / fund_broadcast["assets"].replace(0, np.nan)
 
     # === Sector group (Series, index=symbol) ===
     sector_aligned = sector_series.reindex(symbols).fillna("Unknown")
