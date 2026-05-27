@@ -163,17 +163,17 @@ def fetch_account_state():
 
 
 @st.cache_data(ttl=60)
-def fetch_portfolio_history():
+def fetch_portfolio_history(period="1M", timeframe="1D"):
     """Alpaca portfolio history API → 일별 자산 시계열."""
     tc = get_trading_client()
     try:
         hist = tc.get_portfolio_history(
-            history_filter={"period": "1M", "timeframe": "1D"}
+            history_filter={"period": period, "timeframe": timeframe}
         )
     except Exception:
         try:
             from alpaca.trading.requests import GetPortfolioHistoryRequest
-            req = GetPortfolioHistoryRequest(period="1M", timeframe="1D")
+            req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe)
             hist = tc.get_portfolio_history(history_filter=req)
         except Exception as e:
             return None, str(e)
@@ -184,6 +184,8 @@ def fetch_portfolio_history():
         "profit_loss": hist.profit_loss,
         "profit_loss_pct": hist.profit_loss_pct,
     })
+    # 계좌 개설 이전 (equity == 0 또는 NaN) 잘라내기
+    df = df[df["equity"].notna() & (df["equity"] > 0)].reset_index(drop=True)
     return df, None
 
 
@@ -245,8 +247,20 @@ c3.metric("Positions", len(state["positions"]) if not state["positions"].empty e
 c4.metric("Status", state["status"])
 
 # === 자산 차트 ===
-st.subheader("Equity Curve")
-hist_df, err = fetch_portfolio_history()
+header_col, period_col = st.columns([3, 2])
+with header_col:
+    st.subheader("Equity Curve")
+with period_col:
+    period_options = {"1W": "1W", "1M": "1M", "3M": "3M", "1Y": "1Y", "ALL": "all"}
+    selected_period = st.radio(
+        "기간",
+        list(period_options.keys()),
+        index=1,  # 1M 기본
+        horizontal=True,
+        label_visibility="collapsed",
+    )
+
+hist_df, err = fetch_portfolio_history(period=period_options[selected_period])
 if err or hist_df is None or hist_df.empty:
     st.info("아직 자산 히스토리가 없거나 API 호출 실패. 봇이 한 번 이상 돌고 거래일이 지나야 곡선이 그려집니다.")
     if err:
