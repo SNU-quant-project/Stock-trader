@@ -807,9 +807,13 @@ with tab3:
                     def short_err(e):
                         import re
                         m = re.search(r'"message":"([^"]+)"', e or "")
-                        if m:
-                            return m.group(1)
-                        return (e or "")[:120]
+                        msg = m.group(1) if m else (e or "")[:120]
+                        # >=, <= 같은 escape 디코드
+                        try:
+                            msg = msg.encode("utf-8").decode("unicode_escape")
+                        except Exception:
+                            pass
+                        return msg
 
                     from collections import Counter
                     err_counter = Counter(short_err(f.get("error", "")) for f in failed_list)

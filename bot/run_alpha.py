@@ -90,15 +90,16 @@ def compute_today_weights(panel, sector_map, expression, settings):
 
 # === 4. 목표 포지션 ↔ 주문 ===
 
-MIN_QTY = 1e-4  # 이보다 작은 절댓값은 주문 안 함
+MIN_QTY = 1e-4       # 이보다 작은 절댓값은 주문 안 함
+MIN_NOTIONAL = 1.05  # Alpaca fractional 최소 $1 — 여유 마진 5%
 
 
 def get_target_shares(weights, equity, latest_prices, fractional=True):
     """목표 주식 수.
 
-    Alpaca 제약: fractional 은 long 만 가능, short 는 정수만 허용.
-    - long  (w > 0): fractional=True 면 소수점 4자리
-    - short (w < 0): 항상 정수 (truncate toward 0)
+    Alpaca 제약:
+      - fractional 은 long 만 가능, short 는 정수만 허용
+      - fractional 주문은 cost basis (qty × price) 가 $1 이상이어야 함
     """
     shares = {}
     for sym, w in weights.items():
@@ -110,8 +111,12 @@ def get_target_shares(weights, equity, latest_prices, fractional=True):
             n = round(target_dollar / price, 4)
         else:
             n = int(target_dollar / price)
-        if abs(n) >= MIN_QTY:
-            shares[sym] = n
+        if abs(n) < MIN_QTY:
+            continue
+        # fractional 최소 금액 체크 (정수 주문은 이미 1주 이상이라 통과)
+        if abs(n * price) < MIN_NOTIONAL:
+            continue
+        shares[sym] = n
     return shares
 
 
