@@ -11,6 +11,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # === 1. 데이터 로드 ===
 
@@ -52,6 +55,40 @@ def build_price_matrices(panel):
 
     return close, open_
 
+def apply_truncation(positions, limit=0.08):
+    """한 번만 적용: 8% 초과분을 같은 부호의 미만 종목들에 비례 재분배.
+    재분배 후에도 일부 종목이 8%를 초과할 수 있음 (Brain과 동일한 동작).
+    """
+    result = positions.copy()
+
+    for date in result.index:
+        row = result.loc[date].copy()
+
+        # Long 사이드
+        long_mask = row > 0
+        long_excess_mask = row > limit
+        if long_excess_mask.any():
+            excess = (row[long_excess_mask] - limit).sum()
+            row[long_excess_mask] = limit
+            long_room_mask = long_mask & (row < limit)
+            if long_room_mask.any():
+                weights = row[long_room_mask] / row[long_room_mask].sum()
+                row[long_room_mask] += excess * weights
+
+        # Short 사이드
+        short_mask = row < 0
+        short_excess_mask = row < -limit
+        if short_excess_mask.any():
+            excess = (row[short_excess_mask] + limit).sum()  # 음수
+            row[short_excess_mask] = -limit
+            short_room_mask = short_mask & (row > -limit)
+            if short_room_mask.any():
+                weights = row[short_room_mask] / row[short_room_mask].sum()
+                row[short_room_mask] += excess * weights
+
+        result.loc[date] = row
+
+    return result
 
 # === 3. 알파 파이프라인 ===
 
@@ -100,6 +137,10 @@ def compute_alpha(close, sector_map):
     abs_sum = neutralized.abs().sum(axis=1)
     normalized = neutralized.div(abs_sum, axis=0)
 
+    # (7) Truncation: 정규화된 포지션 비중 기준으로 8% 캡
+    #     long/short 사이드 합은 보존되므로 |sum|=1 도 유지됨
+    normalized = apply_truncation(normalized, limit=0.08)
+
     return normalized
 
 
@@ -140,28 +181,26 @@ def backtest(position, close, open_):
 # === 6. 성과 지표 ===
 
 def compute_metrics(portfolio_returns, position):
-    """주요 지표 계산."""
-    # NaN 제거 (워밍업 구간)
     rets = portfolio_returns.dropna()
 
-    # 누적 수익
     cumulative = (1 + rets).cumprod()
     total_return = cumulative.iloc[-1] - 1
 
-    # 연환산 Sharpe
     sharpe = rets.mean() / rets.std() * np.sqrt(252) if rets.std() > 0 else 0
 
-    # MDD
     running_max = cumulative.cummax()
     drawdown = (cumulative - running_max) / running_max
     mdd = drawdown.min()
 
-    # 승률
     win_rate = (rets > 0).mean()
 
-    # 회전율 (turnover): 일평균 |position 변화| 합
     trade = position.diff().abs().sum(axis=1).dropna()
     avg_turnover = trade.mean()
+
+    # Max weight concentration: 각 날짜의 최대 |포지션|, 1년 평균과 최댓값
+    daily_max_weight = position.abs().max(axis=1).dropna()
+    avg_max_weight = daily_max_weight.mean()
+    peak_max_weight = daily_max_weight.max()
 
     return {
         "total_return": total_return,
@@ -170,6 +209,8 @@ def compute_metrics(portfolio_returns, position):
         "mdd": mdd,
         "win_rate": win_rate,
         "avg_turnover": avg_turnover,
+        "avg_max_weight": avg_max_weight,
+        "peak_max_weight": peak_max_weight,
         "n_days": len(rets),
         "cumulative": cumulative,
         "drawdown": drawdown,
@@ -184,6 +225,8 @@ def print_metrics(m):
     print(f"  MDD            : {m['mdd']:+.2%}")
     print(f"  승률           : {m['win_rate']:.2%}")
     print(f"  평균 회전율    : {m['avg_turnover']:.2%}/일")
+    print(f"  평균 최대비중  : {m['avg_max_weight']:.2%}")
+    print(f"  최고 최대비중  : {m['peak_max_weight']:.2%}")
 
 
 # === 7. 시각화 ===

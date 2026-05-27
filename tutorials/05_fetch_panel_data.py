@@ -4,6 +4,9 @@
 #   1. 테스트 기간 동안 한 번이라도 S&P 500이었던 종목 set 구성
 #   2. Alpaca에서 그 종목들의 1년치 일봉을 배치로 받음
 #   3. Parquet 파일로 저장
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import os
 import time

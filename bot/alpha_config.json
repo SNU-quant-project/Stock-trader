@@ -1,0 +1,10 @@
+{
+  "expression": "rank(-returns)",
+  "settings": {
+    "neutralization": "Sector",
+    "decay": 0,
+    "truncation": 0,
+    "delay": 1
+  },
+  "description": "단기 평균회귀 — 어제 떨어진 종목 long, 오른 종목 short"
+}

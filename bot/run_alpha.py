@@ -30,9 +30,11 @@ from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
 from lib.sp500_universe import load_data, get_sp500_members_at
+from lib.alpha_eval import evaluate
 
 
 LOG_DIR = ROOT / "bot" / "logs"
+CONFIG_FILE = ROOT / "bot" / "alpha_config.json"
 
 
 # === 1. Setup ===
@@ -71,30 +73,19 @@ def fetch_recent_panel(data_client, symbols, lookback_days=15, batch_size=50):
 
 # === 3. 알파 계산 (마지막 날만) ===
 
-def compute_today_weights(panel, sector_map):
-    """마지막 거래일 기준 포지션 비중. |sum| = 1, long/short 각 0.5."""
-    close = panel["close"].unstack(level="symbol")
+def load_config():
+    """alpha_config.json 에서 expression + settings 읽기."""
+    with open(CONFIG_FILE, encoding="utf-8") as f:
+        return json.load(f)
 
-    returns = close.pct_change()
-    raw = -returns
-    ranked = raw.rank(axis=1, pct=True)
-    demeaned = ranked - 0.5
 
-    # sector neutralize
-    sectors = pd.Series(sector_map)
-    sym_to_sec = sectors.reindex(demeaned.columns)
-    neutralized = demeaned.copy()
-    for sec in sym_to_sec.dropna().unique():
-        mask = (sym_to_sec == sec).values
-        cols = demeaned.columns[mask]
-        sec_mean = demeaned[cols].mean(axis=1)
-        neutralized[cols] = demeaned[cols].sub(sec_mean, axis=0)
-
-    # normalize |sum| = 1
-    abs_sum = neutralized.abs().sum(axis=1)
-    normalized = neutralized.div(abs_sum, axis=0)
-
-    return normalized.iloc[-1].dropna()
+def compute_today_weights(panel, sector_map, expression, settings):
+    """alpha expression 평가해서 마지막 거래일 포지션 비중 반환."""
+    try:
+        fundamentals = pd.read_parquet(ROOT / "data" / "sp500_fundamentals.parquet")
+    except FileNotFoundError:
+        fundamentals = pd.DataFrame()
+    return evaluate(expression, panel, fundamentals, sector_map, settings)
 
 
 # === 4. 목표 포지션 ↔ 주문 ===
@@ -207,7 +198,13 @@ def main(dry_run=False):
     for s in members:
         sector_map.setdefault(s, "Unknown")
 
-    weights = compute_today_weights(panel, sector_map)
+    cfg = load_config()
+    expression = cfg["expression"]
+    settings = cfg.get("settings", {})
+    print(f"  expression: {expression}")
+    print(f"  settings:   {settings}")
+
+    weights = compute_today_weights(panel, sector_map, expression, settings)
     longs = weights[weights > 0]
     shorts = weights[weights < 0]
     print(f"  종목 수: {len(weights)}  long: {len(longs)}  short: {len(shorts)}")
@@ -234,6 +231,8 @@ def main(dry_run=False):
         "equity": equity,
         "universe_size": len(members),
         "panel_last_date": str(last_date),
+        "expression": expression,
+        "settings": settings,
         "weights": {k: float(v) for k, v in weights.items()},
         "target_shares": target,
         "current_positions": current,
