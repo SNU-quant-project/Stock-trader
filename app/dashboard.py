@@ -38,16 +38,104 @@ def get_trading_client():
     )
 
 
+@st.cache_data(ttl=3600)
+def load_company_map():
+    """Symbol → {name, sector} 매핑."""
+    df = pd.read_csv(ROOT / "data" / "sp500_current.csv")
+    return {
+        row["Symbol"]: {"name": row["Security"], "sector": row["GICS Sector"]}
+        for _, row in df.iterrows()
+    }
+
+
+def yahoo_url(symbol):
+    return f"https://finance.yahoo.com/quote/{symbol}/"
+
+
+def render_position_table(df, side):
+    """positions 테이블을 HTML 로 직접 렌더 — 회사명 클릭 시 Yahoo Finance 로 이동."""
+    if df.empty:
+        st.info(f"No {side} positions.")
+        return
+
+    rows = []
+    for _, r in df.iterrows():
+        url = yahoo_url(r["symbol"])
+        plpc = r["unrealized_plpc"] * 100
+        plpc_color = "#2ecc71" if plpc >= 0 else "#e74c3c"
+        rows.append(f"""
+            <tr>
+              <td><b>{r['symbol']}</b></td>
+              <td><a href="{url}" target="_blank" style="text-decoration:none; color:#1f77b4;">{r['name']}</a></td>
+              <td style="color:#888;">{r['sector']}</td>
+              <td style="text-align:right;">{r['qty']:.4f}</td>
+              <td style="text-align:right;">${r['current_price']:.2f}</td>
+              <td style="text-align:right;">${r['market_value']:,.0f}</td>
+              <td style="text-align:right; color:{plpc_color};">{plpc:+.2f}%</td>
+              <td style="text-align:right;">{r['weight']*100:.2f}%</td>
+            </tr>
+        """)
+
+    html = f"""
+    <table style="width:100%; border-collapse:collapse; font-size:13px;">
+      <thead>
+        <tr style="border-bottom:2px solid #ddd; text-align:left;">
+          <th>Symbol</th><th>Company</th><th>Sector</th>
+          <th style="text-align:right;">Qty</th>
+          <th style="text-align:right;">Price</th>
+          <th style="text-align:right;">Value</th>
+          <th style="text-align:right;">P/L%</th>
+          <th style="text-align:right;">Weight</th>
+        </tr>
+      </thead>
+      <tbody>{''.join(rows)}</tbody>
+    </table>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_weight_table(items, company_map):
+    """[(symbol, weight)] 리스트를 회사명 링크 포함 테이블로."""
+    rows = []
+    for sym, w in items:
+        info = company_map.get(sym, {"name": sym, "sector": "Unknown"})
+        url = yahoo_url(sym)
+        rows.append(f"""
+            <tr>
+              <td><b>{sym}</b></td>
+              <td><a href="{url}" target="_blank" style="text-decoration:none; color:#1f77b4;">{info['name']}</a></td>
+              <td style="color:#888;">{info['sector']}</td>
+              <td style="text-align:right;">{w*100:+.3f}%</td>
+            </tr>
+        """)
+    html = f"""
+    <table style="width:100%; border-collapse:collapse; font-size:13px;">
+      <thead>
+        <tr style="border-bottom:2px solid #ddd; text-align:left;">
+          <th>Symbol</th><th>Company</th><th>Sector</th>
+          <th style="text-align:right;">Weight</th>
+        </tr>
+      </thead>
+      <tbody>{''.join(rows)}</tbody>
+    </table>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+
 @st.cache_data(ttl=60)
 def fetch_account_state():
     tc = get_trading_client()
     acct = tc.get_account()
     positions = tc.get_all_positions()
+    cmap = load_company_map()
 
     pos_rows = []
     for p in positions:
+        info = cmap.get(p.symbol, {"name": p.symbol, "sector": "Unknown"})
         pos_rows.append({
             "symbol": p.symbol,
+            "name": info["name"],
+            "sector": info["sector"],
             "qty": float(p.qty),
             "avg_entry": float(p.avg_entry_price),
             "current_price": float(p.current_price) if p.current_price else None,
@@ -193,41 +281,14 @@ with tab1:
         gross = pos_df["market_value"].abs().sum()
         pos_df["weight"] = pos_df["market_value"] / gross
 
-        col_long, col_short = st.columns(2)
-        with col_long:
-            st.markdown("### Long")
-            longs = pos_df[pos_df["side"] == "long"].sort_values("weight", ascending=False)
-            st.dataframe(
-                longs[["symbol", "qty", "avg_entry", "current_price",
-                       "market_value", "unrealized_plpc", "weight"]],
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "qty": st.column_config.NumberColumn(format="%.0f"),
-                    "avg_entry": st.column_config.NumberColumn(format="$%.2f"),
-                    "current_price": st.column_config.NumberColumn(format="$%.2f"),
-                    "market_value": st.column_config.NumberColumn(format="$%.0f"),
-                    "unrealized_plpc": st.column_config.NumberColumn(format="%.2f%%"),
-                    "weight": st.column_config.NumberColumn(format="%.2f%%"),
-                },
-            )
-        with col_short:
-            st.markdown("### Short")
-            shorts = pos_df[pos_df["side"] == "short"].sort_values("weight")
-            st.dataframe(
-                shorts[["symbol", "qty", "avg_entry", "current_price",
-                        "market_value", "unrealized_plpc", "weight"]],
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "qty": st.column_config.NumberColumn(format="%.0f"),
-                    "avg_entry": st.column_config.NumberColumn(format="$%.2f"),
-                    "current_price": st.column_config.NumberColumn(format="$%.2f"),
-                    "market_value": st.column_config.NumberColumn(format="$%.0f"),
-                    "unrealized_plpc": st.column_config.NumberColumn(format="%.2f%%"),
-                    "weight": st.column_config.NumberColumn(format="%.2f%%"),
-                },
-            )
+        st.caption("회사명을 클릭하면 Yahoo Finance 페이지로 이동합니다.")
+        st.markdown(f"### Long ({(pos_df['side']=='long').sum()})")
+        longs = pos_df[pos_df["side"] == "long"].sort_values("weight", ascending=False)
+        render_position_table(longs, "long")
+
+        st.markdown(f"### Short ({(pos_df['side']=='short').sum()})")
+        shorts = pos_df[pos_df["side"] == "short"].sort_values("weight")
+        render_position_table(shorts, "short")
 
 with tab2:
     st.markdown("### 현재 돌리는 알파 (`bot/run_alpha.py` 의 `compute_today_weights`)")
@@ -273,12 +334,12 @@ with tab3:
 
                 weights = log.get("weights", {})
                 if weights:
-                    w_df = pd.DataFrame(
-                        [{"symbol": k, "weight": v} for k, v in weights.items()]
-                    ).sort_values("weight", ascending=False)
+                    cmap = load_company_map()
+                    sorted_w = sorted(weights.items(), key=lambda x: -x[1])
+                    st.caption("회사명을 클릭하면 Yahoo Finance 페이지로 이동합니다.")
                     st.markdown("**Top 10 Long**")
-                    st.dataframe(w_df.head(10), use_container_width=True, hide_index=True)
+                    render_weight_table(sorted_w[:10], cmap)
                     st.markdown("**Top 10 Short**")
-                    st.dataframe(w_df.tail(10).iloc[::-1], use_container_width=True, hide_index=True)
+                    render_weight_table(sorted_w[-10:][::-1], cmap)
 
 st.caption(f"Last refreshed: {datetime.now():%Y-%m-%d %H:%M:%S}")
