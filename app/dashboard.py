@@ -370,7 +370,64 @@ else:
     st.caption(f"시작 ${base:,.2f} → 현재 ${equity:,.2f}  ({total_return:+.2%})")
 
 # === 탭: 포지션 / 알파 코드 / 로그 ===
-tab1, tab2, tab3 = st.tabs(["Positions", "Alpha Code", "Bot Logs"])
+tab1, tab_ord, tab2, tab3 = st.tabs(["Positions", "Orders", "Alpha Code", "Bot Logs"])
+
+with tab_ord:
+    st.markdown(f"### 현재 Open Orders ({n_open}건)")
+    if n_open == 0:
+        st.info("미체결 주문이 없습니다.")
+    else:
+        col_a, col_b = st.columns([1, 5])
+        with col_a:
+            if st.button("🚫 모두 취소", type="primary"):
+                n, errs = cancel_all_open_orders()
+                st.success(f"취소 요청: {n}건, 실패: {errs}건")
+                st.cache_data.clear()
+                st.rerun()
+        with col_b:
+            st.caption("개별 종목 옆 ✕ 버튼으로 한 건씩 취소도 가능합니다.")
+
+        cmap = load_company_map()
+        rows = []
+        for o in open_orders:
+            info = cmap.get(o.symbol, {"name": o.symbol, "sector": "Unknown"})
+            rows.append({
+                "id": str(o.id),
+                "symbol": o.symbol,
+                "name": info["name"],
+                "side": o.side.value if hasattr(o.side, "value") else str(o.side),
+                "qty": float(o.qty) if o.qty else 0.0,
+                "status": o.status.value if hasattr(o.status, "value") else str(o.status),
+                "submitted_at": str(o.submitted_at)[:19] if o.submitted_at else "",
+            })
+        ord_df = pd.DataFrame(rows).sort_values(["side", "symbol"])
+
+        # 표 직접 HTML 로 (개별 cancel 버튼 행렬은 streamlit 에서 어려우니 일단 표만)
+        header = (
+            f'<tr style="border-bottom:2px solid #ddd; text-align:left; font-size:12px;">'
+            f'<th>Symbol</th><th>Company</th><th>Side</th>'
+            f'<th style="text-align:right;">Qty</th>'
+            f'<th>Status</th><th>Submitted</th></tr>'
+        )
+        body = ""
+        for _, r in ord_df.iterrows():
+            side_color = "#2ecc71" if r["side"] == "buy" else "#e74c3c"
+            url = yahoo_url(r["symbol"])
+            body += (
+                f'<tr style="border-bottom:1px solid #eee; font-size:13px;">'
+                f'<td><b>{r["symbol"]}</b></td>'
+                f'<td><a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;">{r["name"]}</a></td>'
+                f'<td style="color:{side_color}; font-weight:600;">{r["side"].upper()}</td>'
+                f'<td style="text-align:right;">{r["qty"]:.4f}</td>'
+                f'<td style="color:#888;">{r["status"]}</td>'
+                f'<td style="color:#888; font-size:12px;">{r["submitted_at"]}</td>'
+                f'</tr>'
+            )
+        st.markdown(
+            f'<table style="width:100%; border-collapse:collapse;">'
+            f'<thead>{header}</thead><tbody>{body}</tbody></table>',
+            unsafe_allow_html=True,
+        )
 
 with tab1:
     pos_df = state["positions"]
@@ -619,6 +676,55 @@ with tab3:
                 if log.get("settings"):
                     s = log["settings"]
                     st.caption(f"**세팅**: Neut={s.get('neutralization')}, Decay={s.get('decay')}, Trunc={s.get('truncation')}, Delay={s.get('delay')}")
+
+                # === 실패 주문 상세 ===
+                failed_list = log.get("failed", [])
+                if failed_list:
+                    st.markdown(f"#### ❌ 실패한 주문 ({len(failed_list)}건)")
+                    # 에러 메시지에서 핵심만 추출
+                    def short_err(e):
+                        import re
+                        m = re.search(r'"message":"([^"]+)"', e or "")
+                        if m:
+                            return m.group(1)
+                        return (e or "")[:120]
+
+                    from collections import Counter
+                    err_counter = Counter(short_err(f.get("error", "")) for f in failed_list)
+                    st.caption("**에러 종류별 건수**")
+                    err_rows = ""
+                    for err, cnt in err_counter.most_common():
+                        err_rows += (
+                            f'<tr><td style="padding:4px 8px; color:#c0392b;">{cnt}건</td>'
+                            f'<td style="padding:4px 8px;">{err}</td></tr>'
+                        )
+                    st.markdown(
+                        f'<table style="border-collapse:collapse; font-size:12px;">'
+                        f'<tbody>{err_rows}</tbody></table>',
+                        unsafe_allow_html=True,
+                    )
+
+                    with st.expander(f"상세 보기 (종목 {len(failed_list)}개)"):
+                        cmap = load_company_map()
+                        rows = ""
+                        for f in failed_list:
+                            sym = f.get("symbol", "?")
+                            qty = f.get("qty", 0)
+                            err = short_err(f.get("error", ""))
+                            info = cmap.get(sym, {"name": sym})
+                            rows += (
+                                f'<tr style="border-bottom:1px solid #eee; font-size:12px;">'
+                                f'<td><b>{sym}</b></td><td>{info["name"]}</td>'
+                                f'<td style="text-align:right;">{qty}</td>'
+                                f'<td style="color:#c0392b;">{err}</td></tr>'
+                            )
+                        st.markdown(
+                            f'<table style="width:100%; border-collapse:collapse;">'
+                            f'<thead><tr style="border-bottom:2px solid #ddd; font-size:12px; text-align:left;">'
+                            f'<th>Symbol</th><th>Company</th><th style="text-align:right;">Qty</th><th>Error</th>'
+                            f'</tr></thead><tbody>{rows}</tbody></table>',
+                            unsafe_allow_html=True,
+                        )
 
                 weights = log.get("weights", {})
                 if weights:

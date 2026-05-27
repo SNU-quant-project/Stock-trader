@@ -219,11 +219,25 @@ def main(dry_run=False):
     orders = reconcile(target, current)
     print(f"  목표 종목: {len(target)}  현재 보유: {len(current)}  주문 건수: {len(orders)}\n")
 
+    # LIVE 시 wash trade 방지를 위해 기존 open orders 먼저 취소
+    cancelled_n = 0
+    if not dry_run:
+        try:
+            cancel_results = trading.cancel_orders()
+            cancelled_n = len(cancel_results) if cancel_results else 0
+            if cancelled_n:
+                print(f"[wash-trade 방지] 기존 open orders {cancelled_n}건 취소 요청")
+                import time
+                time.sleep(2)  # 거래소 처리 대기
+        except Exception as e:
+            print(f"[경고] open orders 취소 실패: {e}")
+        print()
+
     print("[6/6] 주문 제출...")
     submitted, failed = submit_orders(trading, orders, dry_run=dry_run)
     print()
 
-    print(f"=== 완료: 제출 {len(submitted)}, 실패 {len(failed)} ===")
+    print(f"=== 완료: 제출 {len(submitted)}, 실패 {len(failed)} (사전 취소 {cancelled_n}) ===")
 
     write_log({
         "started_at": started_at.isoformat(),
@@ -237,6 +251,7 @@ def main(dry_run=False):
         "target_shares": target,
         "current_positions": current,
         "orders": orders,
+        "pre_cancelled": cancelled_n,
         "submitted": submitted,
         "failed": failed,
     })
