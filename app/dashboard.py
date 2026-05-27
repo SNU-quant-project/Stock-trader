@@ -45,6 +45,26 @@ def save_alpha_config(cfg):
 
 st.set_page_config(page_title="SNU Quant — Alpha Bot", layout="wide")
 
+# 메트릭 폰트 크기 줄이기 (100% 화면에서도 잘리지 않게)
+st.markdown(
+    """
+    <style>
+    [data-testid="stMetricValue"] {
+        font-size: 1.6rem !important;
+        line-height: 1.2 !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.8rem !important;
+        color: #666 !important;
+    }
+    [data-testid="stMetricDelta"] {
+        font-size: 0.75rem !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 load_dotenv(ROOT / ".env")
 
 
@@ -292,7 +312,7 @@ try:
 except Exception:
     market_label, market_sub = "—", ""
 
-c1, c2, c3, c4, c5 = st.columns([1.2, 1, 1, 1, 1.4])
+c1, c2, c3, c4, c5 = st.columns([1.5, 1.3, 0.8, 0.9, 1.7])
 c1.metric("Equity", f"${equity:,.2f}", f"{daily_return:+.2%} (vs prev close)")
 c2.metric("Cash", f"${cash:,.2f}")
 c3.metric("Positions", len(state["positions"]) if not state["positions"].empty else 0)
