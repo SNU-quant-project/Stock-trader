@@ -70,14 +70,17 @@ def build_namespace(panel, fundamentals, sector_series):
     return ns
 
 
-def evaluate(expression, panel, fundamentals, sector_map, settings=None):
-    """expression 을 평가해서 마지막 거래일 weight Series 반환.
+def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_full=False):
+    """expression 을 평가해서 weight 반환.
 
     settings:
-      - neutralization: "Sector" | "None" | "Market"
+      - neutralization: "Sector" | "Cap Bucket" | "Sector + Cap Bucket" | "Market" | "None"
       - decay: int (linear decay days, 0=skip)
       - truncation: float (0.0~0.20, 0=skip)
       - delay: 1 (기본; D-1 데이터로 D 진입)
+
+    return_full=False (기본): 마지막 거래일 Series 반환
+    return_full=True: 전체 날짜 DataFrame 반환 (백테스팅용)
     """
     settings = settings or {}
     sector_series = pd.Series(sector_map, name="sector")
@@ -127,15 +130,17 @@ def evaluate(expression, panel, fundamentals, sector_map, settings=None):
     if decay_d and decay_d > 1:
         raw = ops.ts_decay_linear(raw, decay_d)
 
-    # === 5. Delay (D-1 데이터로 D 진입) ===
-    delay = settings.get("delay", 1)
-    if delay > 0:
-        # 마지막 행을 잡되, shift 효과는 panel.pct_change 가 이미 D 종가 -> 다음날 시그널이라
-        # 여기서는 단순히 마지막 행만 사용
-        pass
+    # === 5. Delay ===
+    # raw[t] 는 t 일자 close 까지 본 알파.
+    # 라이브 봇: 마지막 행이 어제(D-1)자 알파 → 오늘(D) 시가 진입. shift 불필요.
+    # 백테스트: backtest 함수에서 weights.shift(delay) 처리해 lookahead 회피.
 
-    # === 6. Normalize |sum|=1 ===
-    last = raw.iloc[-1].dropna()
-    if last.abs().sum() > 0:
-        last = last / last.abs().sum()
+    # === 6. Normalize |sum|=1 (각 날짜) ===
+    abs_sum = raw.abs().sum(axis=1).replace(0, np.nan)
+    full = raw.div(abs_sum, axis=0)
+
+    if return_full:
+        return full.dropna(how="all")
+
+    last = full.iloc[-1].dropna()
     return last

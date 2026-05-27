@@ -370,7 +370,7 @@ else:
     st.caption(f"시작 ${base:,.2f} → 현재 ${equity:,.2f}  ({total_return:+.2%})")
 
 # === 탭: 포지션 / 알파 코드 / 로그 ===
-tab1, tab_ord, tab2, tab3 = st.tabs(["Positions", "Orders", "Alpha Code", "Bot Logs"])
+tab1, tab_ord, tab2, tab_bt, tab3 = st.tabs(["Positions", "Orders", "Alpha Code", "Backtest", "Bot Logs"])
 
 with tab_ord:
     st.markdown(f"### 현재 Open Orders ({n_open}건)")
@@ -631,6 +631,93 @@ rank(fcf / cap)
 -ts_zscore(returns, 5)
 ```
 """)
+
+with tab_bt:
+    st.markdown("### 백테스팅")
+    st.caption(
+        "현재 저장된 알파 식과 세팅으로 `data/sp500_panel.parquet` (S&P 500 1년치) 백테스팅을 실행합니다.  \n"
+        "**모델**: D 시가 진입 → D+1 시가 청산, 매일 리밸런싱, slippage·수수료 없음."
+    )
+
+    # 현재 cfg 다시 로드 (Edit 탭에서 막 저장했을 수 있음)
+    bt_cfg = load_alpha_config()
+    bt_settings = bt_cfg.get("settings", {})
+
+    col_show, col_run = st.columns([4, 1])
+    with col_show:
+        st.code(bt_cfg.get("expression", ""), language="javascript")
+        st.caption(
+            f"Neutralization=**{bt_settings.get('neutralization','-')}**, "
+            f"Decay=**{bt_settings.get('decay',0)}**, "
+            f"Truncation=**{bt_settings.get('truncation',0)}**, "
+            f"Delay=**{bt_settings.get('delay',1)}**"
+        )
+    with col_run:
+        bt_clicked = st.button("🧪 Run Backtest", type="primary", use_container_width=True)
+
+    if bt_clicked:
+        from lib.backtest import backtest_alpha
+        try:
+            with st.spinner("백테스팅 실행 중... (~30초)"):
+                metrics = backtest_alpha(bt_cfg["expression"], bt_settings)
+        except Exception as e:
+            st.error(f"백테스팅 실패: {e}")
+            metrics = None
+
+        if metrics and "error" not in metrics:
+            st.divider()
+            st.markdown("#### 📊 성과 지표")
+
+            mc = st.columns(4)
+            mc[0].metric("총 수익률", f"{metrics['total_return']:+.2%}")
+            mc[1].metric("연환산 수익률", f"{metrics['annual_return']:+.2%}")
+            mc[2].metric("Sharpe", f"{metrics['sharpe']:.3f}")
+            mc[3].metric("MDD", f"{metrics['mdd']:+.2%}")
+
+            mc2 = st.columns(4)
+            mc2[0].metric("승률", f"{metrics['win_rate']:.2%}")
+            mc2[1].metric("일평균 회전율", f"{metrics['avg_turnover']:.2%}")
+            mc2[2].metric("평균 최대비중", f"{metrics['avg_max_weight']:.2%}")
+            mc2[3].metric("거래일 수", f"{metrics['n_days']}일")
+
+            # === Cumulative return chart ===
+            st.markdown("#### 📈 Cumulative Return")
+            cum = metrics["cumulative"]
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=cum.index, y=cum.values,
+                mode="lines",
+                line=dict(color="#2ecc71", width=2),
+                name="Cumulative",
+            ))
+            fig.add_hline(y=1.0, line_dash="dash", line_color="gray", line_width=0.7)
+            fig.update_layout(
+                height=340, margin=dict(l=0, r=0, t=10, b=0),
+                yaxis_title="Cumulative Return (× 시작)", xaxis_title="",
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # === Drawdown chart ===
+            st.markdown("#### 📉 Drawdown")
+            dd = metrics["drawdown"]
+            fig2 = go.Figure()
+            fig2.add_trace(go.Scatter(
+                x=dd.index, y=dd.values,
+                fill="tozeroy",
+                mode="lines",
+                line=dict(color="#e74c3c", width=1),
+                fillcolor="rgba(231, 76, 60, 0.3)",
+                name="Drawdown",
+            ))
+            fig2.update_layout(
+                height=240, margin=dict(l=0, r=0, t=10, b=0),
+                yaxis_title="Drawdown", xaxis_title="",
+                yaxis_tickformat=".1%",
+                showlegend=False,
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
 
 with tab3:
     st.markdown("### 최근 봇 실행 로그")
