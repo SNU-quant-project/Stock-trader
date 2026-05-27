@@ -425,11 +425,24 @@ with tab2:
             placeholder="알파의 의미를 짧게 적어두세요.",
         )
 
-        c_save, c_run, _ = st.columns([1, 1, 4])
+        st.markdown(
+            '<div style="background:#fff3cd; border-left:4px solid #f0ad4e; padding:8px 12px; '
+            'font-size:12px; color:#856404; margin-bottom:8px;">'
+            'LIVE 실행은 Alpaca 페이퍼 계좌에 <b>실제 주문을 제출</b>합니다. '
+            '아래 체크박스를 켠 뒤 빨간 버튼을 눌러야 실행됩니다.</div>',
+            unsafe_allow_html=True,
+        )
+        confirm_live = st.checkbox(
+            "확인 — Alpaca 페이퍼 계좌에 실주문을 제출하는 것에 동의합니다.",
+            value=False, key="confirm_live",
+        )
+
+        c_save, c_run, c_live, _ = st.columns([1, 1.4, 1.8, 2.8])
         save_clicked = c_save.form_submit_button("💾 Save")
         run_clicked = c_run.form_submit_button("▶ Save & Dry Run")
+        live_clicked = c_live.form_submit_button("🔴 Save & Run LIVE", type="primary")
 
-    if save_clicked or run_clicked:
+    if save_clicked or run_clicked or live_clicked:
         new_cfg = {
             "expression": new_expr.strip(),
             "settings": {
@@ -443,17 +456,32 @@ with tab2:
         save_alpha_config(new_cfg)
         st.success(f"저장됨 ({CONFIG_FILE.name}). 다음 봇 실행부터 적용됩니다.")
 
-        if run_clicked:
-            with st.spinner("봇 dry-run 실행 중... (~10초)"):
+        cmd_args = None
+        run_label = ""
+        if live_clicked:
+            if not confirm_live:
+                st.error("⚠️ 확인 체크박스를 체크하지 않아 LIVE 실행 취소됨. (저장은 완료)")
+            else:
+                cmd_args = [sys.executable, str(ROOT / "bot" / "run_alpha.py")]
+                run_label = "🔴 LIVE 실행 — Alpaca 에 실제 주문 제출 중... (~30초)"
+        elif run_clicked:
+            cmd_args = [sys.executable, str(ROOT / "bot" / "run_alpha.py"), "--dry-run"]
+            run_label = "🟡 Dry-run 실행 중... (~10초)"
+
+        if cmd_args:
+            with st.spinner(run_label):
                 try:
                     result = subprocess.run(
-                        [sys.executable, str(ROOT / "bot" / "run_alpha.py"), "--dry-run"],
-                        capture_output=True, text=True, timeout=120, cwd=str(ROOT),
+                        cmd_args, capture_output=True, text=True, timeout=180, cwd=str(ROOT),
+                        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
                     )
                     out = result.stdout + result.stderr
                 except Exception as e:
                     out = f"실행 실패: {e}"
-            st.code(out[-3000:], language="text")
+            if live_clicked:
+                st.success("LIVE 실행 완료. 결과는 Bot Logs 탭과 Open Orders 메트릭에서 확인하세요.")
+                st.cache_data.clear()
+            st.code(out[-4000:], language="text")
 
     # === Operators 참고 ===
     with st.expander("📚 사용 가능한 변수와 operator"):
