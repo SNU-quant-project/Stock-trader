@@ -52,6 +52,12 @@ def yahoo_url(symbol):
     return f"https://finance.yahoo.com/quote/{symbol}/"
 
 
+TABLE_STYLE = "width:100%; border-collapse:collapse; font-size:13px;"
+LINK_STYLE = "text-decoration:none; color:#1f77b4;"
+HEADER_ROW = '<tr style="border-bottom:2px solid #ddd; text-align:left;">'
+RA = 'style="text-align:right;"'
+
+
 def render_position_table(df, side):
     """positions 테이블을 HTML 로 직접 렌더 — 회사명 클릭 시 Yahoo Finance 로 이동."""
     if df.empty:
@@ -62,35 +68,24 @@ def render_position_table(df, side):
     for _, r in df.iterrows():
         url = yahoo_url(r["symbol"])
         plpc = r["unrealized_plpc"] * 100
-        plpc_color = "#2ecc71" if plpc >= 0 else "#e74c3c"
-        rows.append(f"""
-            <tr>
-              <td><b>{r['symbol']}</b></td>
-              <td><a href="{url}" target="_blank" style="text-decoration:none; color:#1f77b4;">{r['name']}</a></td>
-              <td style="color:#888;">{r['sector']}</td>
-              <td style="text-align:right;">{r['qty']:.4f}</td>
-              <td style="text-align:right;">${r['current_price']:.2f}</td>
-              <td style="text-align:right;">${r['market_value']:,.0f}</td>
-              <td style="text-align:right; color:{plpc_color};">{plpc:+.2f}%</td>
-              <td style="text-align:right;">{r['weight']*100:.2f}%</td>
-            </tr>
-        """)
+        color = "#2ecc71" if plpc >= 0 else "#e74c3c"
+        rows.append(
+            f'<tr>'
+            f'<td><b>{r["symbol"]}</b></td>'
+            f'<td><a href="{url}" target="_blank" style="{LINK_STYLE}">{r["name"]}</a></td>'
+            f'<td style="color:#888;">{r["sector"]}</td>'
+            f'<td {RA}>{r["qty"]:.4f}</td>'
+            f'<td {RA}>${r["current_price"]:.2f}</td>'
+            f'<td {RA}>${r["market_value"]:,.0f}</td>'
+            f'<td style="text-align:right; color:{color};">{plpc:+.2f}%</td>'
+            f'<td {RA}>{r["weight"]*100:.2f}%</td>'
+            f'</tr>'
+        )
 
-    html = f"""
-    <table style="width:100%; border-collapse:collapse; font-size:13px;">
-      <thead>
-        <tr style="border-bottom:2px solid #ddd; text-align:left;">
-          <th>Symbol</th><th>Company</th><th>Sector</th>
-          <th style="text-align:right;">Qty</th>
-          <th style="text-align:right;">Price</th>
-          <th style="text-align:right;">Value</th>
-          <th style="text-align:right;">P/L%</th>
-          <th style="text-align:right;">Weight</th>
-        </tr>
-      </thead>
-      <tbody>{''.join(rows)}</tbody>
-    </table>
-    """
+    header = (f'{HEADER_ROW}<th>Symbol</th><th>Company</th><th>Sector</th>'
+              f'<th {RA}>Qty</th><th {RA}>Price</th><th {RA}>Value</th>'
+              f'<th {RA}>P/L%</th><th {RA}>Weight</th></tr>')
+    html = f'<table style="{TABLE_STYLE}"><thead>{header}</thead><tbody>{"".join(rows)}</tbody></table>'
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -100,25 +95,17 @@ def render_weight_table(items, company_map):
     for sym, w in items:
         info = company_map.get(sym, {"name": sym, "sector": "Unknown"})
         url = yahoo_url(sym)
-        rows.append(f"""
-            <tr>
-              <td><b>{sym}</b></td>
-              <td><a href="{url}" target="_blank" style="text-decoration:none; color:#1f77b4;">{info['name']}</a></td>
-              <td style="color:#888;">{info['sector']}</td>
-              <td style="text-align:right;">{w*100:+.3f}%</td>
-            </tr>
-        """)
-    html = f"""
-    <table style="width:100%; border-collapse:collapse; font-size:13px;">
-      <thead>
-        <tr style="border-bottom:2px solid #ddd; text-align:left;">
-          <th>Symbol</th><th>Company</th><th>Sector</th>
-          <th style="text-align:right;">Weight</th>
-        </tr>
-      </thead>
-      <tbody>{''.join(rows)}</tbody>
-    </table>
-    """
+        rows.append(
+            f'<tr>'
+            f'<td><b>{sym}</b></td>'
+            f'<td><a href="{url}" target="_blank" style="{LINK_STYLE}">{info["name"]}</a></td>'
+            f'<td style="color:#888;">{info["sector"]}</td>'
+            f'<td {RA}>{w*100:+.3f}%</td>'
+            f'</tr>'
+        )
+    header = (f'{HEADER_ROW}<th>Symbol</th><th>Company</th><th>Sector</th>'
+              f'<th {RA}>Weight</th></tr>')
+    html = f'<table style="{TABLE_STYLE}"><thead>{header}</thead><tbody>{"".join(rows)}</tbody></table>'
     st.markdown(html, unsafe_allow_html=True)
 
 
