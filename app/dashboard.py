@@ -129,6 +129,13 @@ def render_weight_table(items, company_map):
 
 
 @st.cache_data(ttl=30)
+def fetch_market_clock():
+    """미국 장 개장 여부 + 다음 개장/마감 시간."""
+    tc = get_trading_client()
+    return tc.get_clock()
+
+
+@st.cache_data(ttl=30)
 def fetch_open_orders():
     """현재 미체결 (open) 주문 목록."""
     from alpaca.trading.requests import GetOrdersRequest
@@ -270,13 +277,28 @@ daily_return = (equity - last_equity) / last_equity if last_equity else 0
 open_orders = fetch_open_orders()
 n_open = len(open_orders)
 
-c1, c2, c3, c4, c5 = st.columns([1.2, 1, 1, 1, 1.2])
+# === Market clock (US 장 개장 여부) ===
+try:
+    clock = fetch_market_clock()
+    is_open = bool(clock.is_open)
+    if is_open:
+        next_event = pd.Timestamp(clock.next_close).tz_convert("Asia/Seoul")
+        market_label = "🟢 OPEN"
+        market_sub = f"마감까지 → {next_event:%m/%d %H:%M} KST"
+    else:
+        next_event = pd.Timestamp(clock.next_open).tz_convert("Asia/Seoul")
+        market_label = "🔴 CLOSED"
+        market_sub = f"개장까지 → {next_event:%m/%d %H:%M} KST"
+except Exception:
+    market_label, market_sub = "—", ""
+
+c1, c2, c3, c4, c5 = st.columns([1.2, 1, 1, 1, 1.4])
 c1.metric("Equity", f"${equity:,.2f}", f"{daily_return:+.2%} (vs prev close)")
 c2.metric("Cash", f"${cash:,.2f}")
 c3.metric("Positions", len(state["positions"]) if not state["positions"].empty else 0)
 c4.metric("Open Orders", n_open)
 with c5:
-    st.metric("Status", state["status"])
+    st.metric("US Market", market_label, market_sub, delta_color="off")
     if n_open > 0:
         if st.button(f"🚫 Cancel {n_open} open", use_container_width=True):
             n, errs = cancel_all_open_orders()
