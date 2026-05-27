@@ -92,8 +92,24 @@ def _pick(df, candidates, q_col):
     return None
 
 
+def _match_announcement(quarter_end, earnings_dates_sorted):
+    """quarter_end 직후 가장 빨리 오는 earnings_date 를 발표일로."""
+    if earnings_dates_sorted is None or len(earnings_dates_sorted) == 0:
+        return None
+    qe = pd.Timestamp(quarter_end).tz_localize(None) if pd.Timestamp(quarter_end).tz is None else pd.Timestamp(quarter_end).tz_convert(None)
+    qe = pd.Timestamp(qe).normalize()
+    after = [d for d in earnings_dates_sorted if d >= qe]
+    if not after:
+        return None
+    ann = after[0]
+    # 너무 멀리 떨어진 (90일 초과) 매칭은 잘못된 매핑으로 간주
+    if (ann - qe).days > 90:
+        return None
+    return ann
+
+
 def fetch_one(symbol):
-    """한 종목의 모든 분기 데이터 → [{symbol, quarter_end, ...}, ...]"""
+    """한 종목의 모든 분기 데이터 → [{symbol, quarter_end, announcement_date, ...}, ...]"""
     rows = []
     try:
         t = yf.Ticker(symbol)
@@ -101,14 +117,31 @@ def fetch_one(symbol):
         income = t.quarterly_income_stmt
         cf = t.quarterly_cashflow
 
-        # 분기 발표 시점 (column = quarter_end_date) — 세 표의 합집합
+        # earnings_dates 받기 (실패해도 진행)
+        try:
+            ed = t.earnings_dates
+            if ed is not None and not ed.empty:
+                # 시각 제거하고 date 만, tz naive
+                ed_dates = pd.Series(ed.index)
+                ed_dates = ed_dates.apply(lambda x: pd.Timestamp(x).tz_localize(None) if pd.Timestamp(x).tz is not None else pd.Timestamp(x))
+                ed_dates = ed_dates.apply(lambda x: x.normalize())
+                earnings_dates_sorted = sorted(ed_dates.unique())
+            else:
+                earnings_dates_sorted = []
+        except Exception:
+            earnings_dates_sorted = []
+
         all_quarters = sorted(
             set(bs.columns) | set(income.columns) | set(cf.columns),
             reverse=True,
         )
 
         for q in all_quarters:
-            row = {"symbol": symbol, "quarter_end": pd.Timestamp(q)}
+            row = {
+                "symbol": symbol,
+                "quarter_end": pd.Timestamp(q),
+                "announcement_date": _match_announcement(q, earnings_dates_sorted),
+            }
             for k, candidates in BS_FIELDS.items():
                 row[k] = _pick(bs, candidates, q) if q in bs.columns else None
             for k, candidates in IS_FIELDS.items():

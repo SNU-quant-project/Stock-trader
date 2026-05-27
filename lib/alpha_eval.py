@@ -18,23 +18,30 @@ from . import operators as ops
 
 # ========== 평가 ==========
 
-REPORT_LAG_DAYS = 45  # 분기 종료 후 10-Q 발표까지의 보수적 lag
+FALLBACK_LAG_DAYS = 45  # announcement_date 없을 때 보수적 fallback
 
 
-def _build_pit_fundamentals(fundamentals, dates, symbols, lag_days=REPORT_LAG_DAYS):
+def _build_pit_fundamentals(fundamentals, dates, symbols, fallback_lag=FALLBACK_LAG_DAYS):
     """분기별 (symbol, quarter_end) → 거래일별 PIT (date × symbol) per field.
 
-    각 거래일 t 에 대해 quarter_end + lag_days ≤ t 를 만족하는 가장 최근 분기 데이터 사용.
-    merge_asof 로 종목별 vectorized.
-
-    fundamentals: MultiIndex DataFrame (symbol, quarter_end) → fields
-    반환: dict[field_name] -> DataFrame(date × symbol)
+    각 거래일 t 에 대해 발표일 ≤ t 를 만족하는 가장 최근 분기 데이터만 사용.
+    발표일: fundamentals 에 'announcement_date' 컬럼 있으면 그걸 사용 (정확),
+            없으면 quarter_end + fallback_lag 일 (보수적).
     """
     if fundamentals is None or fundamentals.empty:
         return {}
 
     qdf = fundamentals.reset_index()
-    qdf["available"] = qdf["quarter_end"] + pd.Timedelta(days=lag_days)
+    # available = 실제 발표일 (있으면) 또는 quarter_end + lag
+    fallback = qdf["quarter_end"] + pd.Timedelta(days=fallback_lag)
+    if "announcement_date" in qdf.columns:
+        ann = pd.to_datetime(qdf["announcement_date"], errors="coerce")
+        # tz 정리
+        if hasattr(ann.dtype, "tz") and ann.dt.tz is not None:
+            ann = ann.dt.tz_localize(None)
+        qdf["available"] = ann.fillna(fallback)
+    else:
+        qdf["available"] = fallback
     qdf = qdf.sort_values("available").reset_index(drop=True)
 
     # 거래일 × 종목 매트릭스 — merge_asof 는 left_on (date) 기준 정렬 필요
@@ -49,7 +56,8 @@ def _build_pit_fundamentals(fundamentals, dates, symbols, lag_days=REPORT_LAG_DA
         direction="backward",
     )
 
-    fields = [c for c in fundamentals.columns]
+    # announcement_date 는 메타데이터, fund 필드에서 제외
+    fields = [c for c in fundamentals.columns if c != "announcement_date"]
     result = {}
     for field in fields:
         wide = merged.pivot(index="date", columns="symbol", values=field)
