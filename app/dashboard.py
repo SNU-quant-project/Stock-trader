@@ -635,7 +635,7 @@ rank(fcf / cap)
 with tab_bt:
     st.markdown("### 백테스팅")
     st.caption(
-        "현재 저장된 알파 식과 세팅으로 `data/sp500_panel.parquet` (S&P 500 1년치) 백테스팅을 실행합니다.  \n"
+        "`data/sp500_panel.parquet` (S&P 500 1년치) 으로 백테스팅을 실행합니다.  \n"
         "**모델**: D 시가 진입 → D+1 시가 청산, 매일 리밸런싱, slippage·수수료 없음."
     )
 
@@ -643,23 +643,58 @@ with tab_bt:
     bt_cfg = load_alpha_config()
     bt_settings = bt_cfg.get("settings", {})
 
-    col_show, col_run = st.columns([4, 1])
-    with col_show:
-        st.code(bt_cfg.get("expression", ""), language="javascript")
-        st.caption(
-            f"Neutralization=**{bt_settings.get('neutralization','-')}**, "
-            f"Decay=**{bt_settings.get('decay',0)}**, "
-            f"Truncation=**{bt_settings.get('truncation',0)}**, "
-            f"Delay=**{bt_settings.get('delay',1)}**"
-        )
-    with col_run:
-        bt_clicked = st.button("🧪 Run Backtest", type="primary", use_container_width=True)
+    BT_NEUT_OPTIONS = ["Sector", "Cap Bucket", "Sector + Cap Bucket", "Market", "None"]
 
-    if bt_clicked:
+    with st.form("backtest_form"):
+        bt_expr = st.text_area(
+            "Expression",
+            value=bt_cfg.get("expression", "rank(-returns)"),
+            height=110,
+            help="여기서 바꾼 식은 백테스트만 돌리고 저장은 안 됩니다. 저장하려면 'Save & Run Backtest' 사용.",
+        )
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            cur_neut = bt_settings.get("neutralization", "Sector")
+            bt_neut = st.selectbox(
+                "Neutralization", BT_NEUT_OPTIONS,
+                index=BT_NEUT_OPTIONS.index(cur_neut) if cur_neut in BT_NEUT_OPTIONS else 0,
+            )
+        with col2:
+            bt_decay = st.number_input("Decay (days)", min_value=0, max_value=20,
+                                       value=int(bt_settings.get("decay", 0)))
+        with col3:
+            bt_trunc = st.number_input("Truncation", min_value=0.0, max_value=0.20, step=0.01,
+                                       value=float(bt_settings.get("truncation", 0)), format="%.2f")
+        with col4:
+            bt_delay = st.number_input("Delay", min_value=0, max_value=5,
+                                       value=int(bt_settings.get("delay", 1)),
+                                       help="1 이상이어야 lookahead bias 안 생김.")
+
+        cA, cB, _ = st.columns([1.4, 1.6, 3])
+        bt_only_clicked = cA.form_submit_button("🧪 Run Backtest")
+        bt_save_clicked = cB.form_submit_button("💾 Save & Run Backtest", type="primary")
+
+    if bt_only_clicked or bt_save_clicked:
+        expression = bt_expr.strip()
+        settings = {
+            "neutralization": bt_neut,
+            "decay": int(bt_decay),
+            "truncation": float(bt_trunc),
+            "delay": int(bt_delay),
+        }
+
+        if bt_save_clicked:
+            save_alpha_config({
+                "expression": expression,
+                "settings": settings,
+                "description": bt_cfg.get("description", ""),
+            })
+            st.success("저장됨. 봇 다음 실행부터 적용됩니다.")
+
         from lib.backtest import backtest_alpha
         try:
-            with st.spinner("백테스팅 실행 중... (~30초)"):
-                metrics = backtest_alpha(bt_cfg["expression"], bt_settings)
+            with st.spinner("백테스팅 실행 중... (~30초, group operator 사용 시 더 오래)"):
+                metrics = backtest_alpha(expression, settings)
         except Exception as e:
             st.error(f"백테스팅 실패: {e}")
             metrics = None
