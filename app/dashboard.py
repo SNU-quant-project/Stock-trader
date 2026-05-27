@@ -278,27 +278,79 @@ with tab1:
         render_position_table(shorts, "short")
 
 with tab2:
-    st.markdown("### 현재 돌리는 알파 (`bot/run_alpha.py` 의 `compute_today_weights`)")
-    code_file = ROOT / "bot" / "run_alpha.py"
-    if code_file.exists():
-        full_code = code_file.read_text(encoding="utf-8")
-        # compute_today_weights 함수만 잘라내기
-        start = full_code.find("def compute_today_weights")
-        end = full_code.find("\n\n# ===", start) if start >= 0 else -1
-        snippet = full_code[start:end] if start >= 0 and end > start else full_code
-        st.code(snippet, language="python")
-    else:
-        st.warning("bot/run_alpha.py 파일을 찾을 수 없음")
+    # === Expression (Brain 스타일 dark code block) ===
+    st.markdown("### Code")
+    expression_html = (
+        '<div style="background:#1e1e1e; color:#d4d4d4; padding:16px 20px; '
+        'border-radius:6px; font-family:Consolas,Menlo,monospace; font-size:14px; '
+        'line-height:1.6;">'
+        '<span style="color:#858585;">1</span>&nbsp;&nbsp;&nbsp;'
+        '<span style="color:#9cdcfe;">alpha</span> '
+        '<span style="color:#d4d4d4;">=</span> '
+        '<span style="color:#dcdcaa;">rank</span>'
+        '<span style="color:#d4d4d4;">(-</span>'
+        '<span style="color:#9cdcfe;">returns</span>'
+        '<span style="color:#d4d4d4;">);</span>'
+        '</div>'
+    )
+    st.markdown(expression_html, unsafe_allow_html=True)
 
-    st.markdown("**Spec**")
+    # === Simulation Settings (Brain 스타일 테이블) ===
+    st.markdown("### Simulation Settings")
+    settings = [
+        ("Instrument Type", "Equity"),
+        ("Region", "USA"),
+        ("Universe", "S&P 500"),
+        ("Language", "Fast Expression"),
+        ("Decay", "0"),
+        ("Delay", "1"),
+        ("Truncation", "0"),
+        ("Neutralization", "Sector (GICS)"),
+        ("Pasteurization", "Off"),
+        ("Lookback", "1"),
+        ("Max Trade", "OFF"),
+        ("Max Position", "OFF"),
+    ]
+    header_cells = "".join(
+        f'<th style="padding:8px 12px; background:#f5f5f5; border-bottom:1px solid #ddd; '
+        f'font-size:12px; color:#666; text-align:left; white-space:nowrap;">{k}</th>'
+        for k, _ in settings
+    )
+    body_cells = "".join(
+        f'<td style="padding:8px 12px; border-bottom:1px solid #eee; font-size:13px; '
+        f'white-space:nowrap;">{v}</td>'
+        for _, v in settings
+    )
+    settings_html = (
+        f'<div style="overflow-x:auto;">'
+        f'<table style="border-collapse:collapse; font-size:13px;">'
+        f'<thead><tr>{header_cells}</tr></thead>'
+        f'<tbody><tr>{body_cells}</tr></tbody>'
+        f'</table></div>'
+    )
+    st.markdown(settings_html, unsafe_allow_html=True)
+
+    # === Description ===
+    st.markdown("### Description")
     st.markdown("""
-    - **Alpha**: `rank(-returns)` — 어제 많이 떨어진 종목을 long, 많이 오른 종목을 short
-    - **Neutralization**: GICS Sector (11개 그룹) 내 demean
-    - **Decay**: 없음 (단순 버전)
-    - **Truncation**: 없음 (단순 버전)
-    - **Normalization**: `|sum(weights)| = 1` (gross = equity)
-    - **체결**: D-1 종가 데이터로 계산 → D 시가 시장가 진입
-    """)
+어제 가장 많이 떨어진 종목을 long, 가장 많이 오른 종목을 short — **단기 평균회귀 (short-term mean reversion)** 시그널.
+
+- `returns` = (오늘 종가 / 어제 종가) − 1
+- `-returns` = 부호 반전: 떨어진 종목이 양수, 오른 종목이 음수
+- `rank(x)` = 그날 유니버스 503개 종목 중 cross-sectional 순위 (0~1로 표준화)
+- **Sector Neutralization**: 같은 GICS Sector 내에서 평균 0으로 맞춤 → 특정 섹터 베팅 X, 순수 종목 선택 시그널
+- **Delay 1**: 어제 종가로 계산해서 오늘 시가에 진입 — lookahead bias 방지
+""")
+
+    # === 실제 Python 구현 (참고용) ===
+    with st.expander("실제 Python 구현 보기"):
+        code_file = ROOT / "bot" / "run_alpha.py"
+        if code_file.exists():
+            full_code = code_file.read_text(encoding="utf-8")
+            start = full_code.find("def compute_today_weights")
+            end = full_code.find("\n\n# ===", start) if start >= 0 else -1
+            snippet = full_code[start:end] if start >= 0 and end > start else full_code
+            st.code(snippet, language="python")
 
 with tab3:
     st.markdown("### 최근 봇 실행 로그")
