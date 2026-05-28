@@ -1114,25 +1114,34 @@ with tab_perf:
                 url = yahoo_url(r["symbol"])
                 pl = r["unrealized_pl"]
                 plpc = r["unrealized_plpc"] * 100
+                # Long(파랑) / Short(빨강) 배지
+                if r["side"] == "long":
+                    side_badge = (
+                        '<span style="background:#e7f5ff; color:#1971c2; '
+                        'padding:2px 6px; border-radius:3px; font-size:11px; font-weight:600;">LONG</span>'
+                    )
+                else:
+                    side_badge = (
+                        '<span style="background:#fff5f5; color:#c92a2a; '
+                        'padding:2px 6px; border-radius:3px; font-size:11px; font-weight:600;">SHORT</span>'
+                    )
                 rows += (
-                    f'<tr style="border-bottom:1px solid #eee; font-size:13px;">'
+                    f'<tr style="border-bottom:1px solid #eee; font-size:12px;">'
                     f'<td><b>{r["symbol"]}</b></td>'
-                    f'<td><a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;">{r["name"]}</a></td>'
-                    f'<td style="color:#888;">{r["sector"]}</td>'
-                    f'<td style="text-align:right;">{r["qty"]:.4f}</td>'
-                    f'<td style="text-align:right;">${r["market_value"]:,.0f}</td>'
-                    f'<td style="text-align:right; color:{color}; font-weight:600;">${pl:+,.2f}</td>'
-                    f'<td style="text-align:right; color:{color};">{plpc:+.2f}%</td>'
+                    f'<td>{side_badge}</td>'
+                    f'<td style="max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">'
+                    f'<a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;" title="{r["name"]}">{r["name"]}</a></td>'
+                    f'<td style="text-align:right;">{r["qty"]:+.2f}</td>'
+                    f'<td style="text-align:right;">${abs(r["market_value"]):,.0f}</td>'
+                    f'<td style="text-align:right; color:{color}; font-weight:600; white-space:nowrap;">${pl:+,.0f} ({plpc:+.1f}%)</td>'
                     f'</tr>'
                 )
             header = (
-                '<tr style="border-bottom:2px solid #ddd; font-size:12px; text-align:left;">'
-                '<th>Symbol</th><th>Company</th><th>Sector</th>'
+                '<tr style="border-bottom:2px solid #ddd; font-size:11px; text-align:left; color:#666;">'
+                '<th>Symbol</th><th>Side</th><th>Company</th>'
                 '<th style="text-align:right;">Qty</th>'
                 '<th style="text-align:right;">Value</th>'
-                '<th style="text-align:right;">P&L ($)</th>'
-                '<th style="text-align:right;">P&L (%)</th>'
-                '</tr>'
+                '<th style="text-align:right;">P&L</th></tr>'
             )
             st.markdown(
                 f'<table style="width:100%; border-collapse:collapse;">'
@@ -1153,7 +1162,7 @@ with tab_perf:
     st.caption("매 봇 실행 시 그 시점의 unrealized PnL 을 기록. 시간이 지날수록 더 풍부해집니다.")
 
     log_records = load_recent_logs(50)
-    pnl_history = []  # (date, symbol, unrealized_pl)
+    pnl_history = []
     for _, log in log_records:
         ts = pd.to_datetime(log.get("started_at"))
         for sym, info in (log.get("positions_after") or {}).items():
@@ -1162,37 +1171,51 @@ with tab_perf:
                     "ts": ts,
                     "symbol": sym,
                     "unrealized_pl": info.get("unrealized_pl", 0),
+                    "qty": info.get("qty", 0),
                 })
 
     if not pnl_history:
         st.info("아직 시점별 PnL 기록이 없습니다. 봇이 한 번 이상 LIVE 로 실행되어야 합니다.")
     else:
         pnl_df = pd.DataFrame(pnl_history)
-        # 종목별 최신 ts 기준 PnL 집계
-        latest_by_sym = pnl_df.sort_values("ts").groupby("symbol").last()["unrealized_pl"].sort_values()
+        latest_full = pnl_df.sort_values("ts").groupby("symbol").last()
+        latest_full = latest_full.sort_values("unrealized_pl")
 
         cmap = load_company_map()
 
-        top_winners = latest_by_sym.tail(10)[::-1]
-        top_losers = latest_by_sym.head(10)
+        top_winners = latest_full.tail(10).iloc[::-1]
+        top_losers = latest_full.head(10)
 
-        def _render_simple(series, title, color):
+        def _render_simple(df, title, color):
             st.markdown(f"**{title}**")
             rows = ""
-            for sym, pl in series.items():
+            for sym, r in df.iterrows():
                 info = cmap.get(sym, {"name": sym, "sector": "Unknown"})
                 url = yahoo_url(sym)
+                pl = r["unrealized_pl"]
+                qty = r["qty"]
+                if qty > 0:
+                    side_badge = (
+                        '<span style="background:#e7f5ff; color:#1971c2; '
+                        'padding:2px 6px; border-radius:3px; font-size:11px; font-weight:600;">LONG</span>'
+                    )
+                else:
+                    side_badge = (
+                        '<span style="background:#fff5f5; color:#c92a2a; '
+                        'padding:2px 6px; border-radius:3px; font-size:11px; font-weight:600;">SHORT</span>'
+                    )
                 rows += (
-                    f'<tr style="border-bottom:1px solid #eee; font-size:13px;">'
+                    f'<tr style="border-bottom:1px solid #eee; font-size:12px;">'
                     f'<td><b>{sym}</b></td>'
-                    f'<td><a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;">{info["name"]}</a></td>'
-                    f'<td style="color:#888;">{info["sector"]}</td>'
+                    f'<td>{side_badge}</td>'
+                    f'<td style="max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">'
+                    f'<a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;" title="{info["name"]}">{info["name"]}</a></td>'
                     f'<td style="text-align:right; color:{color}; font-weight:600;">${pl:+,.2f}</td>'
                     f'</tr>'
                 )
             header = (
-                '<tr style="border-bottom:2px solid #ddd; font-size:12px; text-align:left;">'
-                '<th>Symbol</th><th>Company</th><th>Sector</th>'
+                '<tr style="border-bottom:2px solid #ddd; font-size:11px; text-align:left; color:#666;">'
+                '<th>Symbol</th><th>Side</th><th>Company</th>'
                 '<th style="text-align:right;">최신 PnL</th></tr>'
             )
             st.markdown(
