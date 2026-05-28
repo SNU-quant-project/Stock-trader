@@ -257,7 +257,11 @@ def fetch_account_state():
 
 @st.cache_data(ttl=60)
 def fetch_portfolio_history(period="1M", timeframe="1D"):
-    """Alpaca portfolio history API → 일별 자산 시계열."""
+    """Alpaca portfolio history API → 일별 자산 시계열.
+
+    1D timeframe 은 일별 종가만 주므로 장중 실시간 변화가 안 잡힘.
+    현재 account.equity 를 마지막 row 로 append 해서 실시간 반영.
+    """
     tc = get_trading_client()
     try:
         hist = tc.get_portfolio_history(
@@ -279,6 +283,23 @@ def fetch_portfolio_history(period="1M", timeframe="1D"):
     })
     # 계좌 개설 이전 (equity == 0 또는 NaN) 잘라내기
     df = df[df["equity"].notna() & (df["equity"] > 0)].reset_index(drop=True)
+
+    # 마지막 row 가 어제 종가일 수 있으므로 현재 account.equity 를 추가 (장중 실시간 반영)
+    try:
+        acct = tc.get_account()
+        current_eq = float(acct.equity)
+        if not df.empty and abs(df["equity"].iloc[-1] - current_eq) > 0.01:
+            now = pd.Timestamp.utcnow().tz_localize(None)
+            base = df["equity"].iloc[0]
+            df = pd.concat([df, pd.DataFrame({
+                "timestamp": [now],
+                "equity": [current_eq],
+                "profit_loss": [current_eq - base],
+                "profit_loss_pct": [(current_eq / base - 1) if base else 0],
+            })], ignore_index=True)
+    except Exception:
+        pass
+
     return df, None
 
 
