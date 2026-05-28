@@ -636,36 +636,35 @@ with tab1:
             )
             st.plotly_chart(fig, use_container_width=True)
 
-            # Top 10 표 (P&L 포함)
+            # Top 10 표 (좁은 화면에서 안 겹치게 컬럼 축소: P&L $/% 병합, Sector 제거)
             st.markdown("**Top 10 종목**")
             tb = ""
             for _, r in top.iterrows():
                 url = yahoo_url(r["symbol"])
                 plpc = r["unrealized_plpc"] * 100
                 pl_c = "#2ecc71" if r["unrealized_pl"] >= 0 else "#e74c3c"
+                pl_combined = f'${r["unrealized_pl"]:+,.0f} ({plpc:+.1f}%)'
                 tb += (
-                    f'<tr style="border-bottom:1px solid #eee; font-size:13px;">'
+                    f'<tr style="border-bottom:1px solid #eee; font-size:12px;">'
                     f'<td><b>{r["symbol"]}</b></td>'
-                    f'<td><a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;">{r["name"]}</a></td>'
-                    f'<td style="color:#888;">{r["sector"]}</td>'
-                    f'<td style="text-align:right;">{r["qty"]:.4f}</td>'
+                    f'<td style="max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">'
+                    f'<a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;" title="{r["name"]}">{r["name"]}</a></td>'
+                    f'<td style="text-align:right;">{r["qty"]:.2f}</td>'
                     f'<td style="text-align:right;">${r["market_value"]:,.0f}</td>'
-                    f'<td style="text-align:right; color:{pl_c};">${r["unrealized_pl"]:+,.2f}</td>'
-                    f'<td style="text-align:right; color:{pl_c};">{plpc:+.2f}%</td>'
-                    f'<td style="text-align:right; color:{color}; font-weight:600;">{r["weight"]*100:.2f}%</td>'
+                    f'<td style="text-align:right; color:{pl_c}; white-space:nowrap;">{pl_combined}</td>'
+                    f'<td style="text-align:right; color:{color}; font-weight:600;">{r["weight"]*100:.1f}%</td>'
                     f'</tr>'
                 )
             hdr = (
-                '<tr style="border-bottom:2px solid #ddd; text-align:left; font-size:12px;">'
-                '<th>Symbol</th><th>Company</th><th>Sector</th>'
+                '<tr style="border-bottom:2px solid #ddd; text-align:left; font-size:11px; color:#666;">'
+                '<th>Symbol</th><th>Company</th>'
                 '<th style="text-align:right;">Qty</th>'
                 '<th style="text-align:right;">Value</th>'
-                '<th style="text-align:right;">P&L($)</th>'
-                '<th style="text-align:right;">P&L(%)</th>'
+                '<th style="text-align:right;">P&L</th>'
                 '<th style="text-align:right;">Weight</th></tr>'
             )
             st.markdown(
-                f'<table style="width:100%; border-collapse:collapse;">'
+                f'<table style="width:100%; border-collapse:collapse; table-layout:auto;">'
                 f'<thead>{hdr}</thead><tbody>{tb}</tbody></table>',
                 unsafe_allow_html=True,
             )
