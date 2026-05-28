@@ -11,3 +11,4 @@ plotly
 yfinance
 anthropic
 deep-translator
+feedparser
