@@ -615,8 +615,12 @@ with tab1:
             total_pl = df["unrealized_pl"].sum()
             pl_color = "#2ecc71" if total_pl >= 0 else "#e74c3c"
             st.markdown(
-                f"#### {title} ({len(df)}종목, 총 ${total:,.0f}, "
-                f"<span style='color:{pl_color};'>PL ${total_pl:+,.0f}</span>)",
+                f'<div style="font-size:20px; font-weight:600; margin:14px 0 6px 0;">'
+                f'{title} '
+                f'<span style="color:#888; font-size:14px; font-weight:normal;">'
+                f'({len(df)}종목 · 총 ${total:,.0f} · '
+                f'<span style="color:{pl_color}; font-weight:600;">PL ${total_pl:+,.0f}</span>)'
+                f'</span></div>',
                 unsafe_allow_html=True,
             )
 
