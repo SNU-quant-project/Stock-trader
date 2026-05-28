@@ -357,17 +357,6 @@ def load_recent_logs(n=10):
 st.title("SNU Quant — Alpha Bot Dashboard")
 st.caption("Brain 스타일 expression 으로 알파 작성 → 백테스트 → Alpaca 페이퍼 자동매매")
 
-# === 미장 세션 상태 라벨 ===
-_dot, _label = get_market_session()
-st.markdown(
-    f'<div style="font-size:13px; color:#555; margin:6px 0 10px 0;">'
-    f'<span style="display:inline-block; width:8px; height:8px; '
-    f'background:{_dot}; border-radius:50%; margin-right:7px; vertical-align:middle;"></span>'
-    f'<span style="vertical-align:middle;">{_label}</span>'
-    f'</div>',
-    unsafe_allow_html=True,
-)
-
 # === Market Overview (다크 카드, 토스 스타일) ===
 INDEX_INFO = [
     ("^GSPC", "S&P 500"),
@@ -477,19 +466,15 @@ try:
 except Exception:
     market_label, market_sub = "—", ""
 
-c1, c2, c3, c4, c5 = st.columns([1.5, 1.3, 0.8, 0.9, 1.7])
+c1, c2, c3, c4, c5 = st.columns([1.5, 1.3, 0.8, 1.1, 1.7])
 c1.metric("Equity", f"${equity:,.2f}", f"{daily_return:+.2%} (vs prev close)")
 c2.metric("Cash", f"${cash:,.2f}")
 c3.metric("Positions", len(state["positions"]) if not state["positions"].empty else 0)
-c4.metric("Open Orders", n_open)
-with c5:
-    st.metric("US Market", market_label, market_sub, delta_color="off")
+with c4:
+    st.metric("Open Orders", n_open)
     if n_open > 0:
-        if st.button(f"🚫 Cancel {n_open} open", use_container_width=True):
-            n, errs = cancel_all_open_orders()
-            st.success(f"취소 요청: {n}건, 실패: {errs}건")
-            st.cache_data.clear()
-            st.rerun()
+        st.caption(f"⚠️ 미체결 {n_open}건 — Orders 탭에서 취소 가능")
+c5.metric("US Market", market_label, market_sub, delta_color="off")
 
 # === 자산 차트 ===
 header_col, period_col = st.columns([3, 2])
@@ -544,15 +529,20 @@ with tab_ord:
     if n_open == 0:
         st.info("미체결 주문이 없습니다.")
     else:
-        col_a, col_b = st.columns([1, 5])
+        st.caption("비중 = qty × 최신 close 가격 기준 (cost basis).")
+        col_a, col_b = st.columns([2, 4])
         with col_a:
-            if st.button("🚫 모두 취소", type="primary"):
+            if st.button(
+                f"🚫 미체결 주문 {n_open}건 전체 취소",
+                type="primary",
+                use_container_width=True,
+            ):
                 n, errs = cancel_all_open_orders()
                 st.success(f"취소 요청: {n}건, 실패: {errs}건")
                 st.cache_data.clear()
                 st.rerun()
         with col_b:
-            st.caption("비중 = qty × 최신 close 가격 기준 (cost basis).")
+            st.caption("⚠️ 이 버튼을 누르면 아래 표에 있는 모든 주문이 Alpaca 에서 취소됩니다. 체결 전 주문만 취소 가능 (체결된 건은 영향 없음).")
 
         # 최신 close 가격 로드 (캐시 가능)
         @st.cache_data(ttl=300)
