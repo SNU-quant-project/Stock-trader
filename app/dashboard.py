@@ -166,6 +166,70 @@ def fetch_market_indices_yf(tickers, period="30d", interval="1d"):
     return result
 
 
+@st.cache_data(ttl=600)
+def fetch_market_news(n=12):
+    """yfinance 시장 뉴스. 여러 ticker 의 뉴스를 통합 후 시간순으로."""
+    import yfinance as yf
+    tickers = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN"]
+    seen, items = set(), []
+    for t in tickers:
+        try:
+            for n_item in (yf.Ticker(t).news or []):
+                c = n_item.get("content", {}) if isinstance(n_item, dict) else {}
+                title = c.get("title") or ""
+                if not title or title in seen:
+                    continue
+                seen.add(title)
+                items.append({
+                    "title": title,
+                    "summary": c.get("summary", "") or c.get("description", ""),
+                    "publisher": (c.get("provider") or {}).get("displayName", ""),
+                    "link": (c.get("canonicalUrl") or {}).get("url", ""),
+                    "pub_date": c.get("pubDate", ""),
+                })
+        except Exception:
+            continue
+    # 최신순 정렬
+    items.sort(key=lambda x: x.get("pub_date", ""), reverse=True)
+    return items[:n]
+
+
+@st.cache_data(ttl=1800)
+def summarize_market_with_claude(news_items):
+    """Anthropic Claude API 로 시장 뉴스 핵심 이슈 5개 요약."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return None, "ANTHROPIC_API_KEY 가 .env 에 없음. 키를 추가하면 AI 요약 활성화됩니다."
+    try:
+        from anthropic import Anthropic
+    except ImportError:
+        return None, "anthropic 라이브러리 설치 필요 (pip install anthropic)"
+
+    client = Anthropic(api_key=api_key)
+    import re
+    news_text = "\n".join(
+        f"{i+1}. [{n['publisher']}] {n['title']} — {re.sub('<[^>]+>', '', n['summary'])[:200]}"
+        for i, n in enumerate(news_items)
+    )
+    prompt = (
+        "다음은 미국 주식 시장 관련 최신 뉴스 헤드라인이야. "
+        "투자자가 알아야 할 핵심 이슈 5가지를 한국어로 짧게 정리해줘. "
+        "각 항목은 한 줄로, 관련 종목/섹터/사건 위주로. 형식은 정확히 아래처럼:\n"
+        "1. [이슈 한 줄 — 관련 종목 ($AAPL 식으로) 포함]\n"
+        "2. ...\n\n"
+        f"뉴스:\n{news_text}"
+    )
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
+    try:
+        msg = client.messages.create(
+            model=model, max_tokens=700,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text, None
+    except Exception as e:
+        return None, f"Claude API 호출 실패: {e}"
+
+
 def sparkline_svg(values, color, width=110, height=42):
     """SVG sparkline 생성 — 토스 스타일 라인."""
     if values is None or len(values) < 2:
@@ -416,6 +480,31 @@ for col, (sym, label) in zip(mc, INDEX_INFO):
         )
 
 st.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
+
+# === AI 시장 요약 ===
+with st.expander("🤖 AI 시장 요약 — 최근 미국 시장 핵심 이슈 5", expanded=True):
+    news_items = fetch_market_news(10)
+    if not news_items:
+        st.info("뉴스 받아올 수 없습니다.")
+    else:
+        summary, err = summarize_market_with_claude(news_items)
+        if summary:
+            st.markdown(summary)
+            st.caption("Claude 가 요약. 30분마다 갱신.")
+        else:
+            st.warning(f"⚠️ {err}")
+            st.markdown("**최신 헤드라인 (요약 미가공):**")
+            for i, n in enumerate(news_items[:5]):
+                pub = n["publisher"] or "?"
+                link = n["link"] or "#"
+                st.markdown(f"{i+1}. [{n['title']}]({link}) — _{pub}_")
+
+        with st.popover("📰 원문 뉴스 보기 (10건)"):
+            for n in news_items:
+                pub = n["publisher"] or "?"
+                link = n["link"] or "#"
+                date = n["pub_date"][:10] if n["pub_date"] else ""
+                st.markdown(f"- **[{n['title']}]({link})** — _{pub}_ ({date})")
 
 # === 사이드바 ===
 cfg = load_alpha_config()
