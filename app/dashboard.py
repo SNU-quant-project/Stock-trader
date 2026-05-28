@@ -148,6 +148,27 @@ def render_weight_table(items, company_map):
     st.markdown(html, unsafe_allow_html=True)
 
 
+@st.cache_data(ttl=120)
+def fetch_market_index_bars(symbols=("SPY", "QQQ"), lookback_days=45):
+    """SPY (S&P 500) / QQQ (NASDAQ) 일봉. 메인 화면 시장 카드용."""
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+    from datetime import datetime, timedelta, timezone
+
+    client = StockHistoricalDataClient(
+        os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"]
+    )
+    end = datetime.now(timezone.utc) - timedelta(minutes=20)
+    start = end - timedelta(days=lookback_days + 14)
+    req = StockBarsRequest(
+        symbol_or_symbols=list(symbols),
+        timeframe=TimeFrame.Day,
+        start=start, end=end,
+    )
+    return client.get_stock_bars(req).df
+
+
 @st.cache_data(ttl=30)
 def fetch_market_clock():
     """미국 장 개장 여부 + 다음 개장/마감 시간."""
@@ -262,6 +283,66 @@ def load_recent_logs(n=10):
 
 st.title("SNU Quant — Alpha Bot Dashboard")
 st.caption("S&P 500 단기 평균회귀 알파 — Alpaca 페이퍼 트레이딩")
+
+# === Market Overview (S&P / NASDAQ) ===
+try:
+    mkt_bars = fetch_market_index_bars(("SPY", "QQQ"))
+except Exception as e:
+    mkt_bars = None
+
+if mkt_bars is not None and not mkt_bars.empty:
+    INDEX_INFO = [
+        ("SPY", "S&P 500", "#1f77b4"),
+        ("QQQ", "NASDAQ 100", "#9467bd"),
+    ]
+    mc = st.columns(len(INDEX_INFO))
+    for col, (sym, label, color) in zip(mc, INDEX_INFO):
+        try:
+            df = mkt_bars.loc[sym].tail(30)
+        except KeyError:
+            continue
+        if df.empty or len(df) < 2:
+            continue
+        latest = float(df["close"].iloc[-1])
+        prev = float(df["close"].iloc[-2])
+        daily_ret = (latest / prev - 1) * 100
+        period_ret = (latest / float(df["close"].iloc[0]) - 1) * 100
+        line_color = "#2ecc71" if daily_ret >= 0 else "#e74c3c"
+        fill_color = "rgba(46, 204, 113, 0.15)" if daily_ret >= 0 else "rgba(231, 76, 60, 0.15)"
+
+        with col:
+            arrow = "▲" if daily_ret >= 0 else "▼"
+            st.markdown(
+                f'<div style="padding:10px 14px; border:1px solid #eee; border-radius:8px;">'
+                f'<div style="font-size:13px; color:#666;">{label} <span style="color:#aaa;">({sym})</span></div>'
+                f'<div style="display:flex; align-items:baseline; gap:10px; margin-top:4px;">'
+                f'<span style="font-size:24px; font-weight:600;">${latest:,.2f}</span>'
+                f'<span style="color:{line_color}; font-weight:600;">{arrow} {abs(daily_ret):.2f}%</span>'
+                f'<span style="color:#888; font-size:12px;">(30D {period_ret:+.2f}%)</span>'
+                f'</div></div>',
+                unsafe_allow_html=True,
+            )
+            spark = go.Figure()
+            spark.add_trace(go.Scatter(
+                x=df.index.get_level_values("timestamp") if hasattr(df.index, "get_level_values") else df.index,
+                y=df["close"].values,
+                mode="lines",
+                line=dict(color=line_color, width=2),
+                fill="tozeroy",
+                fillcolor=fill_color,
+                showlegend=False,
+                hovertemplate="%{x|%Y-%m-%d}<br>$%{y:,.2f}<extra></extra>",
+            ))
+            spark.update_layout(
+                height=90, margin=dict(l=0, r=0, t=4, b=0),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False, range=[df["close"].min() * 0.99, df["close"].max() * 1.01]),
+                plot_bgcolor="white",
+                paper_bgcolor="white",
+            )
+            st.plotly_chart(spark, use_container_width=True, config={"displayModeBar": False})
+
+st.divider()
 
 # === 사이드바 ===
 cfg = load_alpha_config()
@@ -489,16 +570,89 @@ with tab1:
         st.info("현재 보유 포지션 없음. 봇이 첫 주문을 넣은 뒤 장이 열리면 채워집니다.")
     else:
         gross = pos_df["market_value"].abs().sum()
-        pos_df["weight"] = pos_df["market_value"] / gross
+        pos_df = pos_df.copy()
+        pos_df["weight"] = pos_df["market_value"].abs() / gross
+        pos_df["cost"] = pos_df["market_value"].abs()
 
-        st.caption("회사명을 클릭하면 Yahoo Finance 페이지로 이동합니다.")
-        st.markdown(f"### Long ({(pos_df['side']=='long').sum()})")
-        longs = pos_df[pos_df["side"] == "long"].sort_values("weight", ascending=False)
-        render_position_table(longs, "long")
+        st.caption(f"비중 = |market_value| / 총 gross (${gross:,.0f}). 회사명 클릭 → Yahoo Finance.")
 
-        st.markdown(f"### Short ({(pos_df['side']=='short').sum()})")
-        shorts = pos_df[pos_df["side"] == "short"].sort_values("weight")
-        render_position_table(shorts, "short")
+        longs = pos_df[pos_df["side"] == "long"].copy()
+        shorts = pos_df[pos_df["side"] == "short"].copy()
+
+        def _render_position_side(df, title, color):
+            if df.empty:
+                st.markdown(f"#### {title}")
+                st.info(f"{title} 포지션 없음.")
+                return
+
+            total = df["cost"].sum()
+            df = df.sort_values("cost", ascending=False)
+
+            top = df.head(10)
+            rest = df.iloc[10:]
+            rest_cost = rest["cost"].sum()
+            labels = list(top["symbol"]) + (["Others"] if rest_cost > 0 else [])
+            values = list(top["cost"]) + ([rest_cost] if rest_cost > 0 else [])
+
+            total_pl = df["unrealized_pl"].sum()
+            pl_color = "#2ecc71" if total_pl >= 0 else "#e74c3c"
+            st.markdown(
+                f"#### {title} ({len(df)}종목, 총 ${total:,.0f}, "
+                f"<span style='color:{pl_color};'>PL ${total_pl:+,.0f}</span>)",
+                unsafe_allow_html=True,
+            )
+
+            fig = go.Figure(go.Pie(
+                labels=labels, values=values, hole=0.45,
+                marker=dict(line=dict(color="white", width=1.5)),
+                textinfo="label+percent", textposition="inside",
+                sort=False,
+            ))
+            fig.update_layout(
+                height=320, margin=dict(l=0, r=0, t=10, b=0),
+                showlegend=False,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Top 10 표 (P&L 포함)
+            st.markdown("**Top 10 종목**")
+            tb = ""
+            for _, r in top.iterrows():
+                url = yahoo_url(r["symbol"])
+                plpc = r["unrealized_plpc"] * 100
+                pl_c = "#2ecc71" if r["unrealized_pl"] >= 0 else "#e74c3c"
+                tb += (
+                    f'<tr style="border-bottom:1px solid #eee; font-size:13px;">'
+                    f'<td><b>{r["symbol"]}</b></td>'
+                    f'<td><a href="{url}" target="_blank" style="color:#1f77b4; text-decoration:none;">{r["name"]}</a></td>'
+                    f'<td style="color:#888;">{r["sector"]}</td>'
+                    f'<td style="text-align:right;">{r["qty"]:.4f}</td>'
+                    f'<td style="text-align:right;">${r["market_value"]:,.0f}</td>'
+                    f'<td style="text-align:right; color:{pl_c};">${r["unrealized_pl"]:+,.2f}</td>'
+                    f'<td style="text-align:right; color:{pl_c};">{plpc:+.2f}%</td>'
+                    f'<td style="text-align:right; color:{color}; font-weight:600;">{r["weight"]*100:.2f}%</td>'
+                    f'</tr>'
+                )
+            hdr = (
+                '<tr style="border-bottom:2px solid #ddd; text-align:left; font-size:12px;">'
+                '<th>Symbol</th><th>Company</th><th>Sector</th>'
+                '<th style="text-align:right;">Qty</th>'
+                '<th style="text-align:right;">Value</th>'
+                '<th style="text-align:right;">P&L($)</th>'
+                '<th style="text-align:right;">P&L(%)</th>'
+                '<th style="text-align:right;">Weight</th></tr>'
+            )
+            st.markdown(
+                f'<table style="width:100%; border-collapse:collapse;">'
+                f'<thead>{hdr}</thead><tbody>{tb}</tbody></table>',
+                unsafe_allow_html=True,
+            )
+
+        col_l, col_s = st.columns(2)
+        with col_l:
+            _render_position_side(longs, "🟢 Long", "#2ecc71")
+        with col_s:
+            _render_position_side(shorts, "🔴 Short", "#e74c3c")
 
 with tab2:
     s = cfg.get("settings", {})
