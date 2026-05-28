@@ -168,30 +168,89 @@ def fetch_market_indices_yf(tickers, period="30d", interval="1d"):
 
 @st.cache_data(ttl=600)
 def fetch_market_news(n=12):
-    """yfinance 시장 뉴스. 여러 ticker 의 뉴스를 통합 후 시간순으로."""
+    """yfinance 시장 뉴스 + 중요도 점수.
+
+    중요도 = (같은 제목이 여러 ticker 에서 등장한 횟수, ticker 가중치 적용)
+            + 최근 24시간 보너스
+    """
     import yfinance as yf
-    tickers = ["SPY", "QQQ", "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN"]
-    seen, items = set(), []
+    from datetime import datetime, timezone
+
+    # ticker 가중치: SPY/QQQ 같은 시장 전체 인덱스 ETF 가산점
+    ticker_weight = {
+        "SPY": 3.0, "QQQ": 3.0, "DIA": 2.5,
+        "AAPL": 1.5, "MSFT": 1.5, "NVDA": 1.5,
+        "GOOGL": 1.2, "AMZN": 1.2, "META": 1.2, "TSLA": 1.2,
+    }
+    tickers = list(ticker_weight.keys())
+
+    title_score = {}
+    title_data = {}
+
     for t in tickers:
         try:
             for n_item in (yf.Ticker(t).news or []):
                 c = n_item.get("content", {}) if isinstance(n_item, dict) else {}
-                title = c.get("title") or ""
-                if not title or title in seen:
+                title = (c.get("title") or "").strip()
+                if not title:
                     continue
-                seen.add(title)
-                items.append({
-                    "title": title,
-                    "summary": c.get("summary", "") or c.get("description", ""),
-                    "publisher": (c.get("provider") or {}).get("displayName", ""),
-                    "link": (c.get("canonicalUrl") or {}).get("url", ""),
-                    "pub_date": c.get("pubDate", ""),
-                })
+                title_score[title] = title_score.get(title, 0) + ticker_weight[t]
+                if title not in title_data:
+                    title_data[title] = {
+                        "title": title,
+                        "summary": c.get("summary", "") or c.get("description", ""),
+                        "publisher": (c.get("provider") or {}).get("displayName", ""),
+                        "link": (c.get("canonicalUrl") or {}).get("url", ""),
+                        "pub_date": c.get("pubDate", ""),
+                    }
         except Exception:
             continue
-    # 최신순 정렬
-    items.sort(key=lambda x: x.get("pub_date", ""), reverse=True)
+
+    # 시간 가중치: 최근일수록 가산
+    now = datetime.now(timezone.utc)
+    for title, data in title_data.items():
+        try:
+            pub_str = data.get("pub_date", "")
+            if pub_str:
+                pub = datetime.fromisoformat(pub_str.replace("Z", "+00:00"))
+                hours_ago = (now - pub).total_seconds() / 3600
+                if hours_ago < 48:
+                    title_score[title] += max(0, 3 - hours_ago / 16)
+        except Exception:
+            pass
+
+    items = sorted(
+        title_data.values(),
+        key=lambda x: -title_score.get(x["title"], 0),
+    )
     return items[:n]
+
+
+@st.cache_data(ttl=3600)
+def translate_news_items_ko(items_tuple):
+    """뉴스 제목·요약을 한국어로 번역 (deep-translator 무료, LLM 아님).
+
+    items_tuple 는 (title, summary) 튜플 리스트 — cache key 가 hashable 해야 해서.
+    """
+    try:
+        from deep_translator import GoogleTranslator
+    except ImportError:
+        return {}
+
+    import re
+    titles = [t for t, _ in items_tuple]
+    summaries = [re.sub("<[^>]+>", "", s or "")[:400].strip() for _, s in items_tuple]
+
+    out = {}
+    try:
+        tr = GoogleTranslator(source="en", target="ko")
+        ko_titles = tr.translate_batch(titles) if titles else []
+        ko_summaries = tr.translate_batch([s if s else "_" for s in summaries]) if summaries else []
+        for orig, ko_t, ko_s in zip(titles, ko_titles, ko_summaries):
+            out[orig] = {"title_ko": ko_t, "summary_ko": (ko_s or "").replace("_", "")}
+    except Exception:
+        pass
+    return out
 
 
 @st.cache_data(ttl=1800)
@@ -482,13 +541,24 @@ for col, (sym, label) in zip(mc, INDEX_INFO):
 st.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
 
 # === 미국 시장 헤드라인 ===
-with st.expander("📰 미국 시장 헤드라인 — 최신 5건", expanded=True):
+with st.expander("📰 미국 시장 헤드라인 — 중요도 순 상위 5건", expanded=True):
+    h_col1, h_col2 = st.columns([5, 1])
+    with h_col2:
+        show_ko = st.checkbox("한글 번역", value=True, key="news_show_ko")
+
     news_items = fetch_market_news(10)
     has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
     if not news_items:
         st.info("뉴스 받아올 수 없습니다.")
     else:
+        # 번역 (선택)
+        translations = {}
+        if show_ko:
+            with st.spinner("한국어 번역 중..."):
+                items_tuple = tuple((n["title"], n.get("summary", "")) for n in news_items)
+                translations = translate_news_items_ko(items_tuple)
+
         # API 키 있으면 LLM 요약, 없으면 헤드라인 카드
         summary = None
         if has_api_key:
@@ -500,26 +570,48 @@ with st.expander("📰 미국 시장 헤드라인 — 최신 5건", expanded=Tru
         else:
             import re
             for n in news_items[:5]:
-                title = n["title"]
+                tr = translations.get(n["title"], {})
+                title_en = n["title"]
+                title_ko = tr.get("title_ko", "")
                 pub = n["publisher"] or "?"
                 link = n["link"] or "#"
                 date = n["pub_date"][:10] if n["pub_date"] else ""
-                summary_text = re.sub("<[^>]+>", "", n["summary"] or "")[:180]
+                summary_en = re.sub("<[^>]+>", "", n["summary"] or "")[:200]
+                summary_ko = tr.get("summary_ko", "")
+
+                # 메인 제목 = 한글이면 한글 우선, 영어 보조
+                if show_ko and title_ko:
+                    main_title = title_ko
+                    sub_title = f'<div style="font-size:11px; color:#aaa; margin-top:2px;">{title_en}</div>'
+                else:
+                    main_title = title_en
+                    sub_title = ""
+
+                # 요약: 한글이면 한글, 아니면 영어
+                summary_show = summary_ko if (show_ko and summary_ko) else summary_en
+                summary_html = (
+                    f'<div style="font-size:12px; color:#555; margin-top:4px;">{summary_show}</div>'
+                    if summary_show else ""
+                )
+
                 st.markdown(
                     f'<div style="border-left:3px solid #1971c2; padding:8px 14px; margin-bottom:10px; background:#f8f9fa;">'
-                    f'<a href="{link}" target="_blank" style="color:#1a1d29; text-decoration:none; font-weight:600; font-size:14px;">{title}</a>'
+                    f'<a href="{link}" target="_blank" style="color:#1a1d29; text-decoration:none; font-weight:600; font-size:14px;">{main_title}</a>'
+                    f'{sub_title}'
                     f'<div style="font-size:12px; color:#888; margin-top:3px;">{pub} · {date}</div>'
-                    + (f'<div style="font-size:12px; color:#555; margin-top:4px;">{summary_text}</div>' if summary_text else '')
-                    + '</div>',
+                    f'{summary_html}'
+                    f'</div>',
                     unsafe_allow_html=True,
                 )
 
         with st.popover("📋 더 보기 (10건 전체)"):
             for n in news_items:
+                tr = translations.get(n["title"], {})
+                title_show = tr.get("title_ko") if (show_ko and tr.get("title_ko")) else n["title"]
                 pub = n["publisher"] or "?"
                 link = n["link"] or "#"
                 date = n["pub_date"][:10] if n["pub_date"] else ""
-                st.markdown(f"- **[{n['title']}]({link})** · _{pub}_ ({date})")
+                st.markdown(f"- **[{title_show}]({link})** · _{pub}_ ({date})")
 
 # === 사이드바 ===
 cfg = load_alpha_config()

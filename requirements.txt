@@ -10,3 +10,4 @@ streamlit
 plotly
 yfinance
 anthropic
+deep-translator
