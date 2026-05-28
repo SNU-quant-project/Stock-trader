@@ -481,30 +481,45 @@ for col, (sym, label) in zip(mc, INDEX_INFO):
 
 st.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
 
-# === AI 시장 요약 ===
-with st.expander("🤖 AI 시장 요약 — 최근 미국 시장 핵심 이슈 5", expanded=True):
+# === 미국 시장 헤드라인 ===
+with st.expander("📰 미국 시장 헤드라인 — 최신 5건", expanded=True):
     news_items = fetch_market_news(10)
+    has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+
     if not news_items:
         st.info("뉴스 받아올 수 없습니다.")
     else:
-        summary, err = summarize_market_with_claude(news_items)
+        # API 키 있으면 LLM 요약, 없으면 헤드라인 카드
+        summary = None
+        if has_api_key:
+            summary, _ = summarize_market_with_claude(news_items)
+
         if summary:
             st.markdown(summary)
-            st.caption("Claude 가 요약. 30분마다 갱신.")
+            st.caption("Claude 요약 · 30분마다 갱신")
         else:
-            st.warning(f"⚠️ {err}")
-            st.markdown("**최신 헤드라인 (요약 미가공):**")
-            for i, n in enumerate(news_items[:5]):
+            import re
+            for n in news_items[:5]:
+                title = n["title"]
                 pub = n["publisher"] or "?"
                 link = n["link"] or "#"
-                st.markdown(f"{i+1}. [{n['title']}]({link}) — _{pub}_")
+                date = n["pub_date"][:10] if n["pub_date"] else ""
+                summary_text = re.sub("<[^>]+>", "", n["summary"] or "")[:180]
+                st.markdown(
+                    f'<div style="border-left:3px solid #1971c2; padding:8px 14px; margin-bottom:10px; background:#f8f9fa;">'
+                    f'<a href="{link}" target="_blank" style="color:#1a1d29; text-decoration:none; font-weight:600; font-size:14px;">{title}</a>'
+                    f'<div style="font-size:12px; color:#888; margin-top:3px;">{pub} · {date}</div>'
+                    + (f'<div style="font-size:12px; color:#555; margin-top:4px;">{summary_text}</div>' if summary_text else '')
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
 
-        with st.popover("📰 원문 뉴스 보기 (10건)"):
+        with st.popover("📋 더 보기 (10건 전체)"):
             for n in news_items:
                 pub = n["publisher"] or "?"
                 link = n["link"] or "#"
                 date = n["pub_date"][:10] if n["pub_date"] else ""
-                st.markdown(f"- **[{n['title']}]({link})** — _{pub}_ ({date})")
+                st.markdown(f"- **[{n['title']}]({link})** · _{pub}_ ({date})")
 
 # === 사이드바 ===
 cfg = load_alpha_config()
