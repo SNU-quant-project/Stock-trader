@@ -194,6 +194,40 @@ def fetch_market_clock():
     return tc.get_clock()
 
 
+def get_market_session():
+    """Alpaca clock + ET 시간 기준으로 미장 세션 판단.
+    반환: (dot_color, label)
+    """
+    from datetime import datetime
+    try:
+        import pytz
+    except ImportError:
+        pytz = None
+
+    try:
+        clock = fetch_market_clock()
+        if clock.is_open:
+            return ("#2ecc71", "미장 정규장")
+    except Exception:
+        pass
+
+    if pytz is None:
+        return ("#888", "미장 휴장")
+
+    et = pytz.timezone("America/New_York")
+    now_et = datetime.now(et)
+    if now_et.weekday() >= 5:
+        return ("#888", "미장 휴장 (주말)")
+
+    minute = now_et.hour * 60 + now_et.minute
+    if 4 * 60 <= minute < 9 * 60 + 30:
+        return ("#f39c12", "미장 프리마켓")
+    elif 16 * 60 <= minute < 20 * 60:
+        return ("#f39c12", "미장 애프터마켓")
+    else:
+        return ("#888", "미장 휴장")
+
+
 @st.cache_data(ttl=30)
 def fetch_open_orders():
     """현재 미체결 (open) 주문 목록."""
@@ -321,7 +355,18 @@ def load_recent_logs(n=10):
 # === UI ===
 
 st.title("SNU Quant — Alpha Bot Dashboard")
-st.caption("S&P 500 단기 평균회귀 알파 — Alpaca 페이퍼 트레이딩")
+st.caption("Brain 스타일 expression 으로 알파 작성 → 백테스트 → Alpaca 페이퍼 자동매매")
+
+# === 미장 세션 상태 라벨 ===
+_dot, _label = get_market_session()
+st.markdown(
+    f'<div style="font-size:13px; color:#555; margin:6px 0 10px 0;">'
+    f'<span style="display:inline-block; width:8px; height:8px; '
+    f'background:{_dot}; border-radius:50%; margin-right:7px; vertical-align:middle;"></span>'
+    f'<span style="vertical-align:middle;">{_label}</span>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 
 # === Market Overview (다크 카드, 토스 스타일) ===
 INDEX_INFO = [
