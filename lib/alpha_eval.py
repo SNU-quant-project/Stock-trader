@@ -135,6 +135,73 @@ def build_namespace(panel, fundamentals, sector_series):
     return ns
 
 
+def _evaluate_expression(expression, ns):
+    """Brain 스타일 multi-line expression 평가.
+
+    지원:
+      - 한 줄 식: rank(-returns)
+      - 여러 줄 + 변수 할당:
+          x = rank(-returns);
+          alpha = winsorize(x, std=3);
+      - ';' 또는 newline 으로 줄 구분, '#' 주석
+
+    마지막 statement 가:
+      - 표현식이면 그 값을 반환
+      - 할당이면 LHS 변수의 값을 반환 (Brain 의 `alpha = ...` 컨벤션)
+    """
+    import ast
+
+    # ';' 를 newline 으로 변환 (Brain 호환)
+    code = expression.replace(";", "\n")
+    # 주석 제거 (Python ast 도 # 주석 처리하지만 명확히)
+    lines = []
+    for line in code.split("\n"):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        # 줄 끝 주석도 제거
+        if "#" in line:
+            line = line.split("#", 1)[0]
+        lines.append(line)
+    code = "\n".join(lines)
+
+    if not code.strip():
+        raise ValueError("빈 expression")
+
+    tree = ast.parse(code, mode="exec")
+    if not tree.body:
+        raise ValueError("실행할 statement 없음")
+
+    last_stmt = tree.body[-1]
+    local_ns = dict(ns)
+    safe_globals = {"__builtins__": {}}
+
+    # 마지막 직전까지 exec
+    if len(tree.body) > 1:
+        init_tree = ast.Module(body=tree.body[:-1], type_ignores=[])
+        exec(compile(init_tree, "<alpha>", "exec"), safe_globals, local_ns)
+
+    # 마지막 줄 처리
+    if isinstance(last_stmt, ast.Expr):
+        # 표현식 → 값 반환
+        last_expr = ast.Expression(body=last_stmt.value)
+        return eval(compile(last_expr, "<alpha>", "eval"), safe_globals, local_ns)
+    else:
+        # 할당 등 → exec 후 변수 반환
+        exec(compile(ast.Module(body=[last_stmt], type_ignores=[]), "<alpha>", "exec"),
+             safe_globals, local_ns)
+        # alpha 변수 우선, 없으면 마지막 할당의 LHS
+        if "alpha" in local_ns and (
+            "alpha" not in ns or local_ns["alpha"] is not ns.get("alpha")
+        ):
+            return local_ns["alpha"]
+        if isinstance(last_stmt, ast.Assign):
+            target = last_stmt.targets[0]
+            if isinstance(target, ast.Name):
+                return local_ns.get(target.id)
+        raise ValueError("마지막 줄에서 결과 추출 실패 — `alpha = ...` 으로 끝내거나 마지막 줄을 표현식으로")
+
+
 def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_full=False):
     """expression 을 평가해서 weight 반환.
 
@@ -151,8 +218,8 @@ def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_
     sector_series = pd.Series(sector_map, name="sector")
     ns = build_namespace(panel, fundamentals, sector_series)
 
-    # === 1. 식 평가 ===
-    raw = eval(expression, {"__builtins__": {}}, ns)
+    # === 1. 식 평가 (multi-line 지원) ===
+    raw = _evaluate_expression(expression, ns)
 
     if not isinstance(raw, pd.DataFrame):
         raise ValueError(f"식 결과가 DataFrame 이 아님: {type(raw).__name__}")
