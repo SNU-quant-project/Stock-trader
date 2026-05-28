@@ -148,25 +148,43 @@ def render_weight_table(items, company_map):
     st.markdown(html, unsafe_allow_html=True)
 
 
-@st.cache_data(ttl=120)
-def fetch_market_index_bars(symbols=("SPY", "QQQ"), lookback_days=45):
-    """SPY (S&P 500) / QQQ (NASDAQ) 일봉. 메인 화면 시장 카드용."""
-    from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.requests import StockBarsRequest
-    from alpaca.data.timeframe import TimeFrame
-    from datetime import datetime, timedelta, timezone
+@st.cache_data(ttl=60)
+def fetch_market_indices_yf(tickers, period="30d", interval="1d"):
+    """yfinance 로 시장 인덱스 일봉. ^GSPC, ^IXIC 등 인덱스 직접 가능."""
+    import yfinance as yf
+    data = yf.download(
+        list(tickers), period=period, interval=interval,
+        auto_adjust=False, progress=False, group_by="ticker", threads=True,
+    )
+    result = {}
+    for t in tickers:
+        try:
+            df = data[t] if isinstance(data.columns, pd.MultiIndex) else data
+            result[t] = df.dropna(subset=["Close"]) if not df.empty else pd.DataFrame()
+        except Exception:
+            result[t] = pd.DataFrame()
+    return result
 
-    client = StockHistoricalDataClient(
-        os.environ["ALPACA_API_KEY"], os.environ["ALPACA_SECRET_KEY"]
+
+def sparkline_svg(values, color, width=110, height=42):
+    """SVG sparkline 생성 — 토스 스타일 라인."""
+    if values is None or len(values) < 2:
+        return ""
+    vs = list(map(float, values))
+    min_v, max_v = min(vs), max(vs)
+    rng = max_v - min_v if max_v != min_v else 1
+    pad = 3
+    pts = []
+    for i, v in enumerate(vs):
+        x = i * width / (len(vs) - 1)
+        y = height - pad - (v - min_v) / rng * (height - 2 * pad)
+        pts.append(f"{x:.1f},{y:.1f}")
+    return (
+        f'<svg width="{width}" height="{height}" style="display:block;">'
+        f'<polyline fill="none" stroke="{color}" stroke-width="2" '
+        f'stroke-linecap="round" stroke-linejoin="round" '
+        f'points="{" ".join(pts)}"/></svg>'
     )
-    end = datetime.now(timezone.utc) - timedelta(minutes=20)
-    start = end - timedelta(days=lookback_days + 14)
-    req = StockBarsRequest(
-        symbol_or_symbols=list(symbols),
-        timeframe=TimeFrame.Day,
-        start=start, end=end,
-    )
-    return client.get_stock_bars(req).df
 
 
 @st.cache_data(ttl=30)
@@ -284,65 +302,65 @@ def load_recent_logs(n=10):
 st.title("SNU Quant — Alpha Bot Dashboard")
 st.caption("S&P 500 단기 평균회귀 알파 — Alpaca 페이퍼 트레이딩")
 
-# === Market Overview (S&P / NASDAQ) ===
+# === Market Overview (다크 카드, 토스 스타일) ===
+INDEX_INFO = [
+    ("^GSPC", "S&P 500"),
+    ("^IXIC", "NASDAQ"),
+    ("^DJI", "DOW"),
+    ("^VIX", "VIX"),
+]
 try:
-    mkt_bars = fetch_market_index_bars(("SPY", "QQQ"))
-except Exception as e:
-    mkt_bars = None
+    mkt_data = fetch_market_indices_yf([s for s, _ in INDEX_INFO])
+except Exception:
+    mkt_data = {}
 
-if mkt_bars is not None and not mkt_bars.empty:
-    INDEX_INFO = [
-        ("SPY", "S&P 500", "#1f77b4"),
-        ("QQQ", "NASDAQ 100", "#9467bd"),
-    ]
-    mc = st.columns(len(INDEX_INFO))
-    for col, (sym, label, color) in zip(mc, INDEX_INFO):
-        try:
-            df = mkt_bars.loc[sym].tail(30)
-        except KeyError:
-            continue
-        if df.empty or len(df) < 2:
-            continue
-        latest = float(df["close"].iloc[-1])
-        prev = float(df["close"].iloc[-2])
-        daily_ret = (latest / prev - 1) * 100
-        period_ret = (latest / float(df["close"].iloc[0]) - 1) * 100
-        line_color = "#2ecc71" if daily_ret >= 0 else "#e74c3c"
-        fill_color = "rgba(46, 204, 113, 0.15)" if daily_ret >= 0 else "rgba(231, 76, 60, 0.15)"
-
+mc = st.columns(len(INDEX_INFO))
+for col, (sym, label) in zip(mc, INDEX_INFO):
+    df = mkt_data.get(sym)
+    if df is None or df.empty or len(df) < 2:
         with col:
-            arrow = "▲" if daily_ret >= 0 else "▼"
             st.markdown(
-                f'<div style="padding:10px 14px; border:1px solid #eee; border-radius:8px;">'
-                f'<div style="font-size:13px; color:#666;">{label} <span style="color:#aaa;">({sym})</span></div>'
-                f'<div style="display:flex; align-items:baseline; gap:10px; margin-top:4px;">'
-                f'<span style="font-size:24px; font-weight:600;">${latest:,.2f}</span>'
-                f'<span style="color:{line_color}; font-weight:600;">{arrow} {abs(daily_ret):.2f}%</span>'
-                f'<span style="color:#888; font-size:12px;">(30D {period_ret:+.2f}%)</span>'
-                f'</div></div>',
+                f'<div style="background:#1a1d29; color:#fff; padding:14px 18px; '
+                f'border-radius:10px; height:90px;">'
+                f'<div style="font-size:13px; color:#a0a8b0;">{label}</div>'
+                f'<div style="font-size:16px; color:#888; margin-top:14px;">데이터 없음</div>'
+                f'</div>',
                 unsafe_allow_html=True,
             )
-            spark = go.Figure()
-            spark.add_trace(go.Scatter(
-                x=df.index.get_level_values("timestamp") if hasattr(df.index, "get_level_values") else df.index,
-                y=df["close"].values,
-                mode="lines",
-                line=dict(color=line_color, width=2),
-                fill="tozeroy",
-                fillcolor=fill_color,
-                showlegend=False,
-                hovertemplate="%{x|%Y-%m-%d}<br>$%{y:,.2f}<extra></extra>",
-            ))
-            spark.update_layout(
-                height=90, margin=dict(l=0, r=0, t=4, b=0),
-                xaxis=dict(visible=False),
-                yaxis=dict(visible=False, range=[df["close"].min() * 0.99, df["close"].max() * 1.01]),
-                plot_bgcolor="white",
-                paper_bgcolor="white",
-            )
-            st.plotly_chart(spark, use_container_width=True, config={"displayModeBar": False})
+        continue
 
-st.divider()
+    latest = float(df["Close"].iloc[-1])
+    prev = float(df["Close"].iloc[-2])
+    chg = latest - prev
+    chg_pct = chg / prev * 100
+
+    # 양수=초록 / 음수=빨강 (전세계 표준, Long/Short 다른 탭과 통일)
+    is_up = chg >= 0
+    color = "#2ecc71" if is_up else "#ff5566"
+    sign = "+" if is_up else ""
+
+    spark = sparkline_svg(df["Close"].tail(30).values, color, width=110, height=46)
+
+    with col:
+        st.markdown(
+            f'<div style="background:#1a1d29; color:#fff; padding:14px 18px; '
+            f'border-radius:10px; height:90px; display:flex; '
+            f'justify-content:space-between; align-items:center;">'
+            f'  <div style="min-width:0; flex:1;">'
+            f'    <div style="font-size:13px; color:#a0a8b0;">{label}</div>'
+            f'    <div style="font-size:21px; font-weight:600; margin-top:6px; '
+            f'                white-space:nowrap;">{latest:,.2f}</div>'
+            f'    <div style="font-size:12px; color:{color}; margin-top:2px; '
+            f'                white-space:nowrap;">'
+            f'      {sign}{chg:,.2f} ({sign}{chg_pct:.2f}%)'
+            f'    </div>'
+            f'  </div>'
+            f'  <div style="margin-left:8px; flex-shrink:0;">{spark}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+st.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
 
 # === 사이드바 ===
 cfg = load_alpha_config()
