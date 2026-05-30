@@ -425,24 +425,26 @@ def fetch_account_state():
 
 
 @st.cache_data(ttl=60)
-def fetch_portfolio_history(period="1M", timeframe="1D"):
-    """Alpaca portfolio history API → 일별 자산 시계열.
+def fetch_portfolio_history(period="1D"):
+    """Alpaca portfolio history API → 자산 시계열.
 
-    1D timeframe 은 일별 종가만 주므로 장중 실시간 변화가 안 잡힘.
-    현재 account.equity 를 마지막 row 로 append 해서 실시간 반영.
+    period 에 맞는 timeframe 자동 선택:
+      - 1D  → 5Min (장중 분 단위)
+      - 1W  → 1H
+      - 그 외 → 1D (일별 종가)
+    1D 종가만 받으면 장중 변화 안 잡히므로 현재 equity 를 마지막에 append.
     """
+    from alpaca.trading.requests import GetPortfolioHistoryRequest
+
+    tf_map = {"1D": "5Min", "1W": "1H"}
+    timeframe = tf_map.get(period, "1D")
+
     tc = get_trading_client()
     try:
-        hist = tc.get_portfolio_history(
-            history_filter={"period": period, "timeframe": timeframe}
-        )
-    except Exception:
-        try:
-            from alpaca.trading.requests import GetPortfolioHistoryRequest
-            req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe)
-            hist = tc.get_portfolio_history(history_filter=req)
-        except Exception as e:
-            return None, str(e)
+        req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe)
+        hist = tc.get_portfolio_history(history_filter=req)
+    except Exception as e:
+        return None, str(e)
 
     df = pd.DataFrame({
         "timestamp": pd.to_datetime(hist.timestamp, unit="s"),
@@ -616,11 +618,11 @@ header_col, period_col = st.columns([3, 2])
 with header_col:
     st.subheader("Equity Curve")
 with period_col:
-    period_options = {"1W": "1W", "1M": "1M", "3M": "3M", "1Y": "1Y", "ALL": "all"}
+    period_options = {"1D": "1D", "1W": "1W", "1M": "1M", "3M": "3M", "1Y": "1Y", "ALL": "all"}
     selected_period = st.radio(
         "기간",
         list(period_options.keys()),
-        index=1,  # 1M 기본
+        index=0,  # 1D 기본
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -1183,16 +1185,19 @@ with tab_perf:
     p_col1, p_col2 = st.columns([1, 4])
     with p_col1:
         perf_period = st.selectbox(
-            "기간", ["1W", "1M", "3M", "1Y", "all"], index=1, key="perf_period",
+            "기간", ["1D", "1W", "1M", "3M", "1Y", "all"], index=0, key="perf_period",
         )
 
     hist, err = fetch_portfolio_history(period=perf_period)
     if err or hist is None or hist.empty:
         st.info("아직 거래일 데이터가 부족합니다.")
     else:
-        # 일별 변화 계산
+        # intraday(5Min/1H) 데이터가 와도 날짜별 마지막 값으로 집계 → 일별 표
         h = hist.copy()
         h["date"] = h["timestamp"].dt.date
+        h = h.groupby("date", as_index=False).agg(
+            equity=("equity", "last"), timestamp=("timestamp", "last")
+        )
         h["daily_pl"] = h["equity"].diff()
         h["daily_ret"] = h["equity"].pct_change()
         h["cum_ret"] = h["equity"] / h["equity"].iloc[0] - 1
