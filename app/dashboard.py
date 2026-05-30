@@ -425,23 +425,17 @@ def fetch_account_state():
 
 
 @st.cache_data(ttl=60)
-def fetch_portfolio_history(period="1D"):
-    """Alpaca portfolio history API → 자산 시계열.
+def fetch_portfolio_history(period="1M"):
+    """Alpaca portfolio history API → 일별 종가 자산 시계열.
 
-    period 에 맞는 timeframe 자동 선택:
-      - 1D  → 5Min (장중 분 단위)
-      - 1W  → 1H
-      - 그 외 → 1D (일별 종가)
-    1D 종가만 받으면 장중 변화 안 잡히므로 현재 equity 를 마지막에 append.
+    항상 1D timeframe (각 거래일 장 마감 시점의 자산). 장중 출렁임은 안 보여줌.
+    period 는 조회 범위 (1W/1M/3M/1Y/all).
     """
     from alpaca.trading.requests import GetPortfolioHistoryRequest
 
-    tf_map = {"1D": "5Min", "1W": "1H"}
-    timeframe = tf_map.get(period, "1D")
-
     tc = get_trading_client()
     try:
-        req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe)
+        req = GetPortfolioHistoryRequest(period=period, timeframe="1D")
         hist = tc.get_portfolio_history(history_filter=req)
     except Exception as e:
         return None, str(e)
@@ -454,23 +448,6 @@ def fetch_portfolio_history(period="1D"):
     })
     # 계좌 개설 이전 (equity == 0 또는 NaN) 잘라내기
     df = df[df["equity"].notna() & (df["equity"] > 0)].reset_index(drop=True)
-
-    # 마지막 row 가 어제 종가일 수 있으므로 현재 account.equity 를 추가 (장중 실시간 반영)
-    try:
-        acct = tc.get_account()
-        current_eq = float(acct.equity)
-        if not df.empty and abs(df["equity"].iloc[-1] - current_eq) > 0.01:
-            now = pd.Timestamp.utcnow().tz_localize(None)
-            base = df["equity"].iloc[0]
-            df = pd.concat([df, pd.DataFrame({
-                "timestamp": [now],
-                "equity": [current_eq],
-                "profit_loss": [current_eq - base],
-                "profit_loss_pct": [(current_eq / base - 1) if base else 0],
-            })], ignore_index=True)
-    except Exception:
-        pass
-
     return df, None
 
 
@@ -618,11 +595,11 @@ header_col, period_col = st.columns([3, 2])
 with header_col:
     st.subheader("Equity Curve")
 with period_col:
-    period_options = {"1D": "1D", "1W": "1W", "1M": "1M", "3M": "3M", "1Y": "1Y", "ALL": "all"}
+    period_options = {"1W": "1W", "1M": "1M", "3M": "3M", "1Y": "1Y", "ALL": "all"}
     selected_period = st.radio(
         "기간",
         list(period_options.keys()),
-        index=0,  # 1D 기본
+        index=1,  # 1M 기본
         horizontal=True,
         label_visibility="collapsed",
     )
@@ -1185,7 +1162,7 @@ with tab_perf:
     p_col1, p_col2 = st.columns([1, 4])
     with p_col1:
         perf_period = st.selectbox(
-            "기간", ["1D", "1W", "1M", "3M", "1Y", "all"], index=0, key="perf_period",
+            "기간", ["1W", "1M", "3M", "1Y", "all"], index=1, key="perf_period",
         )
 
     hist, err = fetch_portfolio_history(period=perf_period)
