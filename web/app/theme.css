@@ -1,0 +1,110 @@
+/* ===== SNU Quant Alpha Bot — BRAIN-inspired theme ===== */
+
+:root {
+  /* Surfaces — dark chrome */
+  --nav-bg:        #0b0e17;   /* top nav */
+  --nav-logo-bg:   #06080f;   /* logo block */
+  --simbar-bg:     #161a28;   /* simulation tab bar */
+  --simbar-line:   #232838;
+  --editor-bg:     #0a0c12;   /* code editor */
+  --editor-gutter: #0d1019;
+  --editor-line:   #1b2030;
+  --panel-bg:      #11141f;   /* settings panel card */
+  --panel-input:   #1a1f30;
+  --panel-border:  #2a3145;
+
+  /* Surfaces — light results */
+  --res-bg:        #ffffff;
+  --res-alt:       #f6f8fa;
+  --res-line:      #e6e9ef;
+  --res-rail:      #f0f2f6;
+
+  /* Text */
+  --tx-on-dark:    #e8ecf4;
+  --tx-on-dark-2:  #9aa3b8;
+  --tx-on-dark-3:  #5e6679;
+  --tx-on-light:   #1c2330;
+  --tx-on-light-2: #5b6577;
+  --tx-on-light-3: #8b94a6;
+
+  /* Accent — green */
+  --accent:        #22a06b;
+  --accent-hi:     #28b87b;
+  --accent-lo:     #1b8359;
+  --accent-soft:   #e7f6ef;
+  --accent-line:   #bfe6d3;
+
+  /* Semantic P&L */
+  --up:            #16a36a;
+  --down:          #e0463e;
+
+  /* Cool secondary (for chart / IS badge) */
+  --cool:          #2f7ce0;
+  --cool-soft:     #e9f1fd;
+
+  /* Syntax */
+  --syn-fn:    #4ec9b0;
+  --syn-var:   #9cdcfe;
+  --syn-num:   #b5cea8;
+  --syn-str:   #ce9178;
+  --syn-op:    #d4d4d4;
+  --syn-com:   #6a9955;
+  --syn-paren: #ffd700;
+
+  --r-sm: 4px;
+  --r-md: 6px;
+  --r-lg: 9px;
+
+  --font-ui:  "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --font-mono:"JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  --font-num: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: var(--font-ui);
+  background: #05060b;
+  color: var(--tx-on-light);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+#root { height: 100%; }
+
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+input, select, textarea { font-family: inherit; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #c3cad6; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+.on-dark ::-webkit-scrollbar-thumb,
+.editor-scroll::-webkit-scrollbar-thumb { background: #2b3346; border: 2px solid transparent; background-clip: padding-box; }
+
+.tabnum { font-variant-numeric: tabular-nums; font-family: var(--font-num); }
+
+/* ---- app shell ---- */
+.app {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #05060b;
+}
+
+/* utility */
+.row { display: flex; align-items: center; }
+.col { display: flex; flex-direction: column; }
+.gap4 { gap: 4px; } .gap6 { gap: 6px; } .gap8 { gap: 8px; }
+.gap12 { gap: 12px; } .gap16 { gap: 16px; } .gap24 { gap: 24px; }
+.grow { flex: 1; }
+.up { color: var(--up); }
+.down { color: var(--down); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+@keyframes fadeUp { from { transform: translateY(8px); } to { transform: none; } }
+.fadeUp { animation: fadeUp .35s ease both; }

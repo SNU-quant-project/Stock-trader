@@ -12,3 +12,5 @@ yfinance
 anthropic
 deep-translator
 feedparser
+fastapi
+uvicorn
