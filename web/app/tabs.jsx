@@ -284,8 +284,13 @@ function NewsTab() {
           <SectionTitle>주요 헤드라인</SectionTitle>
           <div style={{ display: "flex", flexDirection: "column" }}>
             {D.news.map((n, i) => (
-              <div key={i} style={{ display: "flex", gap: 14, padding: "13px 0", borderBottom: i < D.news.length - 1 ? "1px solid #f0f2f6" : "none" }}>
-                <div style={{ flex: 1 }}>
+              <a key={i} href={n.link || "#"} target="_blank" rel="noopener noreferrer"
+                style={{ display: "flex", gap: 14, padding: "13px 0", textDecoration: "none",
+                  borderBottom: i < D.news.length - 1 ? "1px solid #f0f2f6" : "none",
+                  cursor: n.link ? "pointer" : "default", borderRadius: 6, transition: "background .12s" }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "var(--res-alt)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
+                <div style={{ flex: 1, padding: "0 8px" }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: "var(--tx-on-light)", lineHeight: 1.4 }}>{n.title}</div>
                   <div style={{ fontSize: 12.5, color: "var(--tx-on-light-2)", marginTop: 3 }}>{n.titleKo}</div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 7 }}>
@@ -294,7 +299,7 @@ function NewsTab() {
                   </div>
                 </div>
                 <Icon name="ext" size={15} style={{ color: "var(--tx-on-light-3)", flexShrink: 0, marginTop: 3 }} />
-              </div>
+              </a>
             ))}
           </div>
         </Card>
