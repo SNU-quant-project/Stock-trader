@@ -119,13 +119,17 @@ def get_account_block():
     except Exception:
         pass
 
-    equity = float(acct.equity)
-    last_equity = float(acct.last_equity) if acct.last_equity else equity
+    live_equity = float(acct.equity)
+    last_equity = float(acct.last_equity) if acct.last_equity else live_equity
+    # 장 닫혔을 때: 실시간 equity 는 stale/오류 quote(예: BNY 가 $10 로 찍힘)를 물 수 있어
+    # 종가(last_equity) 기준으로 표시. 장 중에만 실시간 equity 사용.
+    equity = live_equity if market_open else last_equity
     n_pos = len(longs) + len(shorts)
     return {
         "account": {
             "equity": equity, "cash": float(acct.cash),
             "buyingPower": float(acct.buying_power), "lastEquity": last_equity,
+            "liveEquity": live_equity,
             "positions": n_pos, "openOrders": len(buy_orders) + len(sell_orders),
             "marketOpen": market_open, "nextEvent": next_event or "—",
             "dailyReturn": (equity - last_equity) / last_equity if last_equity else 0,
