@@ -347,6 +347,16 @@ def api_data():
     acct_hist, daily = get_portfolio_history()
     out["acctHist"] = acct_hist
     out["dailyPerf"] = daily
+
+    # 장 닫혔을 때 상단 칩의 일별수익률 = 마지막 거래일 종가 vs 그 전 거래일 종가
+    # (장중 stale quote 기반 실시간 equity 대신, 일별 표와 동일한 종가 기준으로 일치시킴)
+    acct = out.get("account")
+    if acct and not acct.get("marketOpen") and len(acct_hist) >= 2:
+        last_c = acct_hist[-1]["equity"]
+        prev_c = acct_hist[-2]["equity"]
+        if prev_c:
+            acct["dailyReturn"] = (last_c - prev_c) / prev_c
+            acct["equity"] = last_c
     return JSONResponse(out)
 
 
