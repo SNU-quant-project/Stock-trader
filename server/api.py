@@ -84,17 +84,23 @@ def get_account_block():
     except Exception:
         pass
 
-    # 포지션
+    # 포지션 — 종가(lastday_price) 기준으로 가격·P&L 계산.
+    # 실시간 current_price 는 장외 stale/오류 quote(예: BNY $10)를 물 수 있어 종가로 통일.
     longs, shorts = [], []
     try:
         for p in tc.get_all_positions():
             qty = float(p.qty)
+            entry = float(p.avg_entry_price)
+            close_px = float(p.lastday_price) if p.lastday_price else float(p.current_price or 0)
+            mv = close_px * qty
+            pl = (close_px - entry) * qty
+            cost = abs(entry * qty)
+            plpc = pl / cost if cost else 0
             info = cmap.get(p.symbol, {"name": p.symbol, "sector": "Unknown"})
             row = {
                 "sym": p.symbol, "name": info["name"], "sector": info["sector"],
-                "qty": qty, "price": float(p.current_price or 0),
-                "marketValue": float(p.market_value),
-                "pl": float(p.unrealized_pl), "plpc": float(p.unrealized_plpc),
+                "qty": qty, "price": close_px, "marketValue": mv,
+                "pl": pl, "plpc": plpc,
             }
             (longs if qty >= 0 else shorts).append(row)
     except Exception:

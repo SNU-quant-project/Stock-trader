@@ -277,7 +277,7 @@ function BotLogsTab() {
 function NewsTab() {
   const D = window.AB_DATA;
   return (
-    <Page title="Market News" sub="CNBC · MarketWatch · Investing.com 통합 헤드라인 + AI 시장 요약.">
+    <Page title="Market News" sub="CNBC (Markets · Finance · Economy) · MarketWatch 시장 헤드라인. 상담칼럼·라이프스타일 제외.">
       <MarketCards />
       <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 18 }}>
         <Card>
