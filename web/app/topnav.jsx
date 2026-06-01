@@ -76,17 +76,6 @@ function TopNav({ active, onChange }) {
             {fmtPct(acct.dailyReturn)}
           </span>
         </div>
-        {["help", "bell", "user", "menu"].map((n, i) => (
-          <button key={n} style={{
-            position: "relative", width: 34, height: 34, borderRadius: 8,
-            color: "var(--tx-on-dark-2)", display: "grid", placeItems: "center",
-          }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "#fff"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--tx-on-dark-2)"; }}>
-            <Icon name={n} size={18} />
-            {n === "bell" && <span style={{ position: "absolute", top: 7, right: 8, width: 7, height: 7, borderRadius: "50%", background: "var(--down)", border: "1.5px solid var(--nav-bg)" }} />}
-          </button>
-        ))}
       </div>
     </header>
   );
