@@ -205,14 +205,44 @@ def get_indices():
 
 # ============ 뉴스 (RSS) ============
 
+# 시장 관련 키워드 (점수 가산) — 많이 맞을수록 시장 뉴스
+MARKET_KW = re.compile(
+    r"\b(stock|stocks|share|shares|equit|nasdaq|s&p|dow|index|futures|"
+    r"fed|fomc|powell|rate|rates|inflation|cpi|pce|yield|treasur|bond|"
+    r"earning|earnings|revenue|guidance|ipo|merger|acquisition|dividend|buyback|"
+    r"oil|crude|opec|gold|dollar|gdp|jobs|payroll|jobless|unemployment|"
+    r"rally|selloff|sell-off|bull|bear|tariff|chip|semiconductor|ai)\b",
+    re.I,
+)
+# 개인재무 상담칼럼·라이프스타일 잡음 (제외)
+JUNK_KW = re.compile(
+    r"\b(my (husband|wife|son|daughter|mother|father|friend|buddy|sister|brother|boss|fianc)|"
+    r"adviser|advisor|estate|inheritance|will|prenup|alimony|divorce|tip the|tipping|"
+    r"retire early|nest egg|golf|dating|my 401|should i|am i|was i|how do i|how can we|how can i)\b",
+    re.I,
+)
+
+
+def _sp_symbols():
+    def build():
+        try:
+            df = pd.read_csv(ROOT / "data" / "sp500_current.csv")
+            return set(df["Symbol"].astype(str))
+        except Exception:
+            return set()
+    return cached("sp_syms", 3600, build)
+
+
 def get_news():
     def build():
         import feedparser
         from email.utils import parsedate_to_datetime
+        # 시장 전용 피드만 (MW topstories=Moneyist 상담칼럼, Investing=지정학 위주 → 제외)
         feeds = [
-            ("CNBC Markets", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069", 1.5),
-            ("MarketWatch", "http://feeds.marketwatch.com/marketwatch/topstories", 1.0),
-            ("Investing.com", "https://www.investing.com/rss/news_25.rss", 0.8),
+            ("CNBC Markets", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=15839069", 1.6),
+            ("CNBC Finance", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664", 1.3),
+            ("CNBC Economy", "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258", 1.2),
+            ("MarketWatch", "http://feeds.marketwatch.com/marketwatch/marketpulse/", 1.0),
         ]
         score, data = {}, {}
         for pub, url, w in feeds:
@@ -221,7 +251,11 @@ def get_news():
                     title = (e.get("title") or "").strip()
                     if not title:
                         continue
-                    score[title] = score.get(title, 0) + w
+                    # 잡음(상담칼럼) 제외
+                    if JUNK_KW.search(title) or (title.endswith("?") and re.search(r"\b(I|my|me|we)\b", title)):
+                        continue
+                    base = score.get(title, 0)
+                    score[title] = base + w + len(MARKET_KW.findall(title)) * 0.6  # 시장 키워드 가산
                     if title not in data:
                         data[title] = {"title": title, "pub": pub,
                                        "link": e.get("link", ""), "pub_date": e.get("published", "")}
@@ -254,9 +288,11 @@ def get_news():
             for it in items:
                 it["titleKo"] = ""
 
-        # 티커 추출 ($AAPL 패턴 또는 제목 내 대문자 심볼) — 간단히 빈 배열
+        # 티커: 제목에 실제 S&P 500 심볼이 단어로 등장할 때만 (가짜 CFP/AI/CEO 방지)
+        syms = _sp_symbols()
         for it in items:
-            it["tickers"] = re.findall(r"\b([A-Z]{2,5})\b", it["title"])[:2]
+            found = [w for w in re.findall(r"\b[A-Z]{1,5}\b", it["title"]) if w in syms]
+            it["tickers"] = list(dict.fromkeys(found))[:3]
         return items
     return cached("news", 300, build)
 
