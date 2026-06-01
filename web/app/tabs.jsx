@@ -132,9 +132,14 @@ function PerformanceTab() {
             ))}
           </div>
         </div>
-        <LineChart values={eqVals} labels={eqLabels} height={280} color="var(--accent)" yFmt={(v) => "$" + (v / 1000).toFixed(0) + "K"} />
+        <LineChart values={eqVals} labels={eqLabels} height={280} color="var(--accent)"
+          yFmt={(v) => {
+            const span = Math.max(...eqVals) - Math.min(...eqVals);
+            // 값 폭이 작으면 (~$1K 미만) 소수점까지 표시해 라벨이 다 같은 "$100K" 로 뭉개지지 않게
+            return span < 2000 ? "$" + (v / 1000).toFixed(2) + "K" : "$" + (v / 1000).toFixed(0) + "K";
+          }} />
         <div style={{ fontSize: 12.5, color: "var(--tx-on-light-2)", marginTop: 8 }}>
-          시작 {fmtUSD(eqVals[0])} → 현재 {fmtUSD(eqVals[eqVals.length - 1])} <span style={{ color: "var(--up)", fontWeight: 700 }}>({fmtPct(eqVals[eqVals.length - 1] / eqVals[0] - 1)})</span>
+          시작 {fmtUSD(eqVals[0])} → 현재 {fmtUSD(eqVals[eqVals.length - 1])} <span style={{ color: (eqVals[eqVals.length - 1] / eqVals[0] - 1) >= 0 ? "var(--up)" : "var(--down)", fontWeight: 700 }}>({fmtPct(eqVals[eqVals.length - 1] / eqVals[0] - 1)})</span> <span style={{ color: "var(--tx-on-light-3)" }}>· 기간 전체 기준 (상단 Equity 카드는 전일 대비)</span>
         </div>
       </Card>
 
