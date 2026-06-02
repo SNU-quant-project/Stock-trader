@@ -76,23 +76,28 @@ function InfoDot({ tip }) {
   const show = (e) => {
     const r = e.currentTarget.getBoundingClientRect();
     const x = Math.min(Math.max(r.left + r.width / 2, 170), (window.innerWidth || 1400) - 170);
-    setPos({ x, y: r.bottom + 9 });
+    setPos({ x, y: r.bottom + 8 });
   };
-  return (
-    <span onMouseEnter={show} onMouseLeave={() => setPos(null)}
-      style={{ width: 9, height: 9, borderRadius: "50%", background: "var(--cool)", cursor: "help", display: "inline-block" }}>
-      {pos && (
-        <div style={{
-          position: "fixed", left: pos.x, top: pos.y, transform: "translateX(-50%)", zIndex: 400,
-          width: 300, background: "#4a9fe0", color: "#fff", borderRadius: 8, padding: "12px 15px",
-          boxShadow: "0 14px 34px rgba(0,0,0,0.28)", fontSize: 12.5, lineHeight: 1.5, pointerEvents: "none",
-        }}>
-          <div style={{ fontWeight: 700, letterSpacing: 0.6, marginBottom: 6 }}>{tip.title}</div>
-          <div>{tip.text}</div>
-        </div>
-      )}
+  // hover 영역을 넓히려 padding 둔 래퍼, 가운데 작은 점.
+  const target = (
+    <span onMouseEnter={show} onMouseMove={show} onMouseLeave={() => setPos(null)}
+      style={{ display: "inline-flex", alignItems: "center", padding: "3px 4px", margin: "-3px -4px", cursor: "help", verticalAlign: "middle" }}>
+      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--cool)" }} />
     </span>
   );
+  // 툴팁은 body 로 portal → 조상의 transform/overflow 에 안 잘림
+  const tooltip = pos && ReactDOM.createPortal(
+    <div style={{
+      position: "fixed", left: pos.x, top: pos.y, transform: "translateX(-50%)", zIndex: 9999,
+      width: 300, maxWidth: "90vw", background: "#4a9fe0", color: "#fff", borderRadius: 8, padding: "12px 15px",
+      boxShadow: "0 14px 34px rgba(0,0,0,0.28)", fontSize: 12.5, lineHeight: 1.5, pointerEvents: "none",
+    }}>
+      <div style={{ fontWeight: 700, letterSpacing: 0.6, marginBottom: 6 }}>{tip.title}</div>
+      <div>{tip.text}</div>
+    </div>,
+    document.body
+  );
+  return <React.Fragment>{target}{tooltip}</React.Fragment>;
 }
 
 // ---- metric strip ----
