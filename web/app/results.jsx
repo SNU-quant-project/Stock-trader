@@ -59,12 +59,48 @@ function RunningResults({ progress }) {
   );
 }
 
+// ---- 지표 설명 (WorldQuant BRAIN 문구) ----
+const METRIC_TIPS = {
+  Sharpe: { title: "SHARPE", text: "위험 대비 수익률 지표. Sharpe = 연율화 평균 수익률 / 연율화 수익률 표준편차." },
+  Turnover: { title: "TURNOVER", text: "일평균 거래 활동 정도. Turnover = 거래된 금액 / 보유 금액." },
+  Fitness: { title: "FITNESS", text: "전반적 성과를 나타내는 종합 지표. 높을수록 좋음. Fitness = Sharpe × √( |Returns| / max(Turnover, 0.125) )." },
+  Returns: { title: "RETURNS", text: "투자 금액 대비 연율화 평균 손익. (투자 금액 = 북사이즈의 절반)" },
+  Drawdown: { title: "DRAWDOWN", text: "해당 기간 PnL 의 최대 낙폭(고점 대비 최대 하락)을 % 로 표시." },
+  Margin: { title: "MARGIN", text: "거래 1달러당 벌어들인 수익(‰, 천분율). Margin ≈ Returns / Turnover." },
+};
+
+// ---- hover 설명 동그라미 ----
+function InfoDot({ tip }) {
+  const [pos, setPos] = React.useState(null);
+  if (!tip) return <span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--cool)", opacity: 0.6 }} />;
+  const show = (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const x = Math.min(Math.max(r.left + r.width / 2, 170), (window.innerWidth || 1400) - 170);
+    setPos({ x, y: r.bottom + 9 });
+  };
+  return (
+    <span onMouseEnter={show} onMouseLeave={() => setPos(null)}
+      style={{ width: 9, height: 9, borderRadius: "50%", background: "var(--cool)", cursor: "help", display: "inline-block" }}>
+      {pos && (
+        <div style={{
+          position: "fixed", left: pos.x, top: pos.y, transform: "translateX(-50%)", zIndex: 400,
+          width: 300, background: "#4a9fe0", color: "#fff", borderRadius: 8, padding: "12px 15px",
+          boxShadow: "0 14px 34px rgba(0,0,0,0.28)", fontSize: 12.5, lineHeight: 1.5, pointerEvents: "none",
+        }}>
+          <div style={{ fontWeight: 700, letterSpacing: 0.6, marginBottom: 6 }}>{tip.title}</div>
+          <div>{tip.text}</div>
+        </div>
+      )}
+    </span>
+  );
+}
+
 // ---- metric strip ----
 function MetricItem({ label, value, color, sub, style }) {
   return (
     <div style={{ minWidth: 0, ...style }}>
       <div style={{ fontSize: 11.5, color: "var(--tx-on-light-2)", display: "flex", alignItems: "center", gap: 4, fontWeight: 500 }}>
-        {label}<span style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--cool)", opacity: 0.6 }} />
+        {label}<InfoDot tip={METRIC_TIPS[label]} />
       </div>
       <div className="tabnum" style={{ fontSize: 23, fontWeight: 600, marginTop: 3, color: color || "var(--tx-on-light)", whiteSpace: "nowrap" }}>{value}</div>
       {sub && <div style={{ fontSize: 11, color: "var(--tx-on-light-3)" }}>{sub}</div>}
