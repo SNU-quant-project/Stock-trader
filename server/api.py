@@ -368,19 +368,44 @@ def get_bot_logs():
             continue
         submitted = log.get("submitted", [])
         failed = log.get("failed", [])
+        orders = log.get("orders", {})
         n_long = sum(1 for s in submitted if s.get("qty", 0) > 0)
         n_short = sum(1 for s in submitted if s.get("qty", 0) < 0)
         is_dry = bool(log.get("dry_run"))
         status = "ok" if not failed else "warn"
-        note = log.get("expression", "")[:60] or ("Dry run" if is_dry else "")
+        expr = log.get("expression", "")
+        note = expr[:60] or ("Dry run" if is_dry else "")
         if failed:
             note = f"{len(failed)} orders failed · " + note
         started = log.get("started_at", "")
+
+        # 실패 주문 요약 (에러 메시지에서 핵심만)
+        def _short_err(e):
+            m = re.search(r'"message":"([^"]+)"', e or "")
+            msg = m.group(1) if m else (e or "")[:80]
+            try:
+                msg = msg.encode("utf-8").decode("unicode_escape")
+            except Exception:
+                pass
+            return msg
+        failed_sample = [{"symbol": x.get("symbol"), "qty": x.get("qty"),
+                          "error": _short_err(x.get("error", ""))} for x in failed[:8]]
+
         out.append({
             "file": f.name, "at": started[:16].replace("T", " "),
             "mode": "DRY" if is_dry else "LIVE", "status": status,
-            "orders": len(log.get("orders", {})), "longs": n_long, "shorts": n_short,
+            "orders": len(orders), "longs": n_long, "shorts": n_short,
             "note": note, "durMs": 0,
+            # === 세부 디테일 ===
+            "expression": expr,
+            "settings": log.get("settings", {}),
+            "equity": log.get("equity"),
+            "universeSize": log.get("universe_size"),
+            "panelLast": log.get("panel_last_date"),
+            "nSubmitted": len(submitted),
+            "nFailed": len(failed),
+            "preCancelled": log.get("pre_cancelled", 0),
+            "failedSample": failed_sample,
         })
     return out
 

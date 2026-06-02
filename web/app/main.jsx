@@ -136,12 +136,12 @@ const newSettings = () => {
   return live ? { ...base, ...live } : base;
 };
 const liveExpr = () => (typeof window !== "undefined" && window.AB_LIVE_CONFIG && window.AB_LIVE_CONFIG.expression) || "rank(-returns)";
-const newTab = (id) => ({ id, name: "Simulation " + id, expr: liveExpr(), settings: newSettings(), simState: "idle", progress: 0 });
+const newTab = (id, expr = "") => ({ id, name: "Simulation " + id, expr, settings: newSettings(), simState: "idle", progress: 0, result: null });
 
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
   const [activeTab, setActiveTab] = React.useState("backtest");
-  const [tabs, setTabs] = React.useState([newTab(1)]);
+  const [tabs, setTabs] = React.useState([newTab(1, liveExpr())]);  // 최초 탭만 저장된 알파
   const [activeId, setActiveId] = React.useState(1);
   const [showSettings, setShowSettings] = React.useState(false);
   const [panel, setPanel] = React.useState({ code: true, results: true });

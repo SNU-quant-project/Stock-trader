@@ -101,8 +101,16 @@ function SideBlock({ rows, title, dotColor, valueKey, weightFromCost }) {
         <tbody>
           {sorted.slice(0, 8).map((r) => (
             <tr key={r.sym} style={{ borderBottom: "1px solid #f0f2f6" }}>
-              <td style={{ padding: "8px 4px", fontWeight: 700 }}>{r.sym}</td>
-              <td style={{ padding: "8px 4px", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--cool)" }}>{r.name}</td>
+              <td style={{ padding: "8px 4px", fontWeight: 700 }}>
+                <a href={`https://finance.yahoo.com/quote/${r.sym}/`} target="_blank" rel="noopener noreferrer"
+                   style={{ color: "var(--tx-on-light)", textDecoration: "none" }}
+                   onMouseEnter={(e) => { e.currentTarget.style.color = "var(--cool)"; e.currentTarget.style.textDecoration = "underline"; }}
+                   onMouseLeave={(e) => { e.currentTarget.style.color = "var(--tx-on-light)"; e.currentTarget.style.textDecoration = "none"; }}>{r.sym}</a>
+              </td>
+              <td style={{ padding: "8px 4px", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <a href={`https://finance.yahoo.com/quote/${r.sym}/`} target="_blank" rel="noopener noreferrer"
+                   style={{ color: "var(--cool)", textDecoration: "none" }} title={r.name}>{r.name}</a>
+              </td>
               <td className="tabnum" style={{ padding: "8px 4px", textAlign: "right" }}>{fmtUSD0(Math.abs(r[valueKey]))}</td>
               {r.pl !== undefined && <td className="tabnum" style={{ padding: "8px 4px", textAlign: "right", color: r.pl >= 0 ? "var(--up)" : "var(--down)", fontWeight: 600 }}>{fmtUSD0(r.pl)} ({fmtPct(r.plpc, 1)})</td>}
               <td className="tabnum" style={{ padding: "8px 4px", textAlign: "right", color: dotColor, fontWeight: 600 }}>{fmtPctRaw(Math.abs(r[valueKey]) / total, 1)}</td>
@@ -240,34 +248,79 @@ function PositionsTab() {
 }
 
 // ===== Bot Logs =====
+function BotLogRow({ log }) {
+  const [open, setOpen] = React.useState(false);
+  const tone = log.status === "ok" ? "var(--up)" : log.status === "warn" ? "var(--accent)" : "var(--down)";
+  const modeC = log.mode === "LIVE" ? { bg: "#fdeceb", tx: "var(--down)" } : { bg: "var(--cool-soft)", tx: "var(--cool)" };
+  const s = log.settings || {};
+  const hasDetail = log.expression || log.equity != null || (log.failedSample && log.failedSample.length);
+  return (
+    <Card pad={0}>
+      {/* 헤더 (클릭하면 펼침) */}
+      <div onClick={() => hasDetail && setOpen((o) => !o)}
+        style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 20px", cursor: hasDetail ? "pointer" : "default" }}>
+        <span style={{ width: 10, height: 10, borderRadius: "50%", background: tone, flexShrink: 0 }} />
+        <div style={{ minWidth: 150 }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>{log.at}</div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--tx-on-light-3)" }}>{log.file}</div>
+        </div>
+        <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 5, background: modeC.bg, color: modeC.tx, letterSpacing: 0.5 }}>{log.mode}</span>
+        <div style={{ fontSize: 13, color: "var(--tx-on-light-2)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{log.note}</div>
+        <div className="tabnum" style={{ display: "flex", gap: 18, fontSize: 12.5, color: "var(--tx-on-light-2)" }}>
+          <span>orders <b style={{ color: "var(--tx-on-light)" }}>{log.orders}</b></span>
+          <span style={{ color: "var(--cool)" }}>L {log.longs}</span>
+          <span style={{ color: "var(--down)" }}>S {log.shorts}</span>
+        </div>
+        {hasDetail && <Icon name={open ? "chevU" : "chevD"} size={16} style={{ color: "var(--tx-on-light-3)", flexShrink: 0 }} />}
+      </div>
+
+      {/* 세부 디테일 */}
+      {open && hasDetail && (
+        <div style={{ borderTop: "1px solid var(--res-line)", padding: "16px 20px", background: "var(--res-alt)" }}>
+          {log.expression && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--tx-on-light-3)", letterSpacing: 0.5, marginBottom: 5 }}>EXPRESSION</div>
+              <pre style={{ margin: 0, fontFamily: "var(--font-mono)", fontSize: 12.5, color: "var(--tx-on-light)", background: "#fff", border: "1px solid var(--res-line)", borderRadius: 6, padding: "10px 12px", whiteSpace: "pre-wrap" }}>{log.expression}</pre>
+            </div>
+          )}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 28px", fontSize: 12.5, color: "var(--tx-on-light-2)", marginBottom: log.failedSample && log.failedSample.length ? 14 : 0 }}>
+            {s.neutralization != null && <span>Neutralization <b style={{ color: "var(--tx-on-light)" }}>{s.neutralization}</b></span>}
+            {s.decay != null && <span>Decay <b style={{ color: "var(--tx-on-light)" }}>{s.decay}</b></span>}
+            {s.truncation != null && <span>Truncation <b style={{ color: "var(--tx-on-light)" }}>{s.truncation}</b></span>}
+            {s.delay != null && <span>Delay <b style={{ color: "var(--tx-on-light)" }}>{s.delay}</b></span>}
+            {log.equity != null && <span>Equity <b style={{ color: "var(--tx-on-light)" }}>{fmtUSD0(log.equity)}</b></span>}
+            {log.universeSize != null && <span>Universe <b style={{ color: "var(--tx-on-light)" }}>{log.universeSize}</b></span>}
+            {log.panelLast && <span>Panel last <b style={{ color: "var(--tx-on-light)" }}>{log.panelLast}</b></span>}
+            <span>제출 <b style={{ color: "var(--up)" }}>{log.nSubmitted}</b> · 실패 <b style={{ color: "var(--down)" }}>{log.nFailed}</b>{log.preCancelled ? ` · 사전취소 ${log.preCancelled}` : ""}</span>
+          </div>
+          {log.failedSample && log.failedSample.length > 0 && (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--down)", letterSpacing: 0.5, marginBottom: 5 }}>FAILED ORDERS ({log.nFailed})</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <tbody>
+                  {log.failedSample.map((x, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid #f0f2f6" }}>
+                      <td style={{ padding: "5px 4px", fontWeight: 700, width: 70 }}>{x.symbol}</td>
+                      <td className="tabnum" style={{ padding: "5px 4px", width: 70, color: "var(--tx-on-light-2)" }}>{x.qty}</td>
+                      <td style={{ padding: "5px 4px", color: "var(--down)" }}>{x.error}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function BotLogsTab() {
   const D = window.AB_DATA;
   return (
-    <Page title="Bot Logs" sub="매 봇 실행 기록. LIVE 는 Alpaca 에 실주문 제출, DRY 는 시뮬레이션만.">
+    <Page title="Bot Logs" sub="매 봇 실행 기록. LIVE 는 Alpaca 에 실주문 제출, DRY 는 시뮬레이션만. 행 클릭 시 세부 디테일.">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {D.botLogs.map((log) => {
-          const tone = log.status === "ok" ? "var(--up)" : log.status === "warn" ? "var(--accent)" : "var(--down)";
-          const modeC = log.mode === "LIVE" ? { bg: "#fdeceb", tx: "var(--down)" } : { bg: "var(--cool-soft)", tx: "var(--cool)" };
-          return (
-            <Card key={log.file} pad={0}>
-              <div style={{ display: "flex", alignItems: "center", gap: 16, padding: "14px 20px" }}>
-                <span style={{ width: 10, height: 10, borderRadius: "50%", background: tone, flexShrink: 0 }} />
-                <div style={{ minWidth: 150 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{log.at}</div>
-                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--tx-on-light-3)" }}>{log.file}</div>
-                </div>
-                <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 9px", borderRadius: 5, background: modeC.bg, color: modeC.tx, letterSpacing: 0.5 }}>{log.mode}</span>
-                <div style={{ fontSize: 13, color: "var(--tx-on-light-2)", flex: 1 }}>{log.note}</div>
-                <div className="tabnum" style={{ display: "flex", gap: 18, fontSize: 12.5, color: "var(--tx-on-light-2)" }}>
-                  <span>orders <b style={{ color: "var(--tx-on-light)" }}>{log.orders}</b></span>
-                  <span style={{ color: "var(--cool)" }}>L {log.longs}</span>
-                  <span style={{ color: "var(--down)" }}>S {log.shorts}</span>
-                  <span>{(log.durMs / 1000).toFixed(1)}s</span>
-                </div>
-              </div>
-            </Card>
-          );
-        })}
+        {D.botLogs.map((log) => <BotLogRow key={log.file} log={log} />)}
       </div>
     </Page>
   );
