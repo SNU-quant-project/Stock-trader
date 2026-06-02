@@ -64,7 +64,7 @@ const METRIC_TIPS = {
   Sharpe: { title: "SHARPE", text: "위험 대비 수익률 지표. Sharpe = 연율화 평균 수익률 / 연율화 수익률 표준편차." },
   Turnover: { title: "TURNOVER", text: "일평균 거래 활동 정도. Turnover = 거래된 금액 / 보유 금액." },
   Fitness: { title: "FITNESS", text: "전반적 성과를 나타내는 종합 지표. 높을수록 좋음. Fitness = Sharpe × √( |Returns| / max(Turnover, 0.125) )." },
-  Returns: { title: "RETURNS", text: "투자 금액 대비 연율화 평균 손익. (투자 금액 = 북사이즈의 절반)" },
+  Returns: { title: "RETURNS", text: "투자 금액 대비 연율화 평균 손익. 우리는 비중 정규화 |weights|합=1 (long +0.5 / short −0.5) 이라 분모 = 전체 북(gross 노출)." },
   Drawdown: { title: "DRAWDOWN", text: "해당 기간 PnL 의 최대 낙폭(고점 대비 최대 하락)을 % 로 표시." },
   Margin: { title: "MARGIN", text: "거래 1달러당 벌어들인 수익(‰, 천분율). Margin ≈ Returns / Turnover." },
 };
