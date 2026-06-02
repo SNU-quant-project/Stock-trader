@@ -108,6 +108,20 @@ function MetricItem({ label, value, color, sub, style }) {
   );
 }
 
+// ---- Fitness 등급 배지 (BRAIN 스타일) ----
+function FitnessGrade({ fitness }) {
+  const g = fitness <= 1.0 ? { label: "Needs Improvement", c: "#e0463e", bg: "#fdecea", glyph: "✕" }
+          : fitness <= 1.5 ? { label: "Good", c: "#2f7ce0", bg: "#eef2f7", glyph: "★" }
+          : fitness <= 2.0 ? { label: "Excellent", c: "#16a36a", bg: "#e7f6ef", glyph: "✦" }
+          : { label: "Spectacular", c: "#e0792f", bg: "#fff4e8", glyph: "❂" };
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "6px 14px 6px 8px", borderRadius: 20, background: g.bg, border: `1px solid ${g.c}55` }}>
+      <span style={{ width: 20, height: 20, borderRadius: "50%", display: "grid", placeItems: "center", border: `1.6px solid ${g.c}`, color: g.c, fontSize: 11, fontWeight: 700, lineHeight: 1 }}>{g.glyph}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: g.c }}>{g.label}</span>
+    </span>
+  );
+}
+
 function Pill({ icon, children, tone }) {
   const tones = {
     warn: { bg: "#fff4e8", bd: "#f3d3a8", tx: "#b9760f", dot: "#e0792f" },
@@ -212,8 +226,8 @@ function DoneResults({ result, tweaks }) {
             </div>
           )}
         </div>
-        <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
-          <Pill tone="warn">{s.sharpe >= 1.3 ? "Production Ready" : "Needs Improvement"}</Pill>
+        <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap", alignItems: "center" }}>
+          <FitnessGrade fitness={s.fitness} />
           <Pill tone="cool">Single Data Set Alpha</Pill>
         </div>
 
