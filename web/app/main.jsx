@@ -114,7 +114,7 @@ function BacktestWorkspace({ state, tweaks }) {
         )}
         {showRes && (
           <div style={{ flex: 1, minWidth: 0 }}>
-            <ResultsPane simState={state.simState} progress={state.progress} tweaks={tweaks}
+            <ResultsPane simState={state.simState} progress={state.progress} result={state.result} tweaks={tweaks}
               onDry={() => state.runBot("dry")}
               onLive={() => state.setLiveModal(true)} />
           </div>
@@ -210,10 +210,7 @@ function App() {
           toast('⚠️ <b>백테스트 실패</b> — ' + res.error);
           return;
         }
-        Object.assign(window.AB_DATA, {
-          isSummary: res.isSummary, pnlScaled: res.pnlScaled,
-          monthLabels: res.monthLabels, yearRows: res.yearRows,
-        });
+        // 결과는 탭별로 저장 (전역 공유 X → 탭마다 독립 result)
         updateTab(id, { simState: "done", progress: 100, result: res });
       })
       .catch((e) => {
@@ -278,7 +275,7 @@ function App() {
 
   const wsState = {
     expr: active ? active.expr : "", setExpr, settings: active ? active.settings : newSettings(), setSettings, showSettings, setShowSettings,
-    simState: active ? active.simState : "idle", progress: active ? active.progress : 0, onSimulate, panel, setPanel, setTweak, toast, setLiveModal,
+    simState: active ? active.simState : "idle", progress: active ? active.progress : 0, result: active ? active.result : null, onSimulate, panel, setPanel, setTweak, toast, setLiveModal,
     tabs, activeId, hasActive: !!active, selectTab: (id) => { setActiveId(id); setShowSettings(false); }, closeTab, addTab,
     runBot, saveConfig,
   };

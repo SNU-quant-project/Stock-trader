@@ -187,31 +187,38 @@ function CodeEditor({ expr, setExpr, tweaks }) {
   }
 
   const sel = ac ? ac.items[ac.idx] : null;
+  const rows = Math.max(lines.length, 18);  // 빈 영역도 클릭/편집 가능하도록 최소 행수
+  // pre 와 textarea 가 픽셀 단위로 겹치도록 동일한 box 스타일 사용
+  const layer = {
+    margin: 0, fontFamily: "var(--font-mono)", fontSize: 14, lineHeight: lineH + "px",
+    whiteSpace: "pre", padding: `${padT}px ${padL}px 0 ${padL}px`, border: "none",
+    tabSize: 4,
+  };
   return (
     <div className="editor-scroll" style={{ position: "relative", flex: 1, background: "var(--editor-bg)", overflow: "auto", fontFamily: "var(--font-mono)", fontSize: 14 }}>
       <div style={{ position: "relative", minHeight: "100%", display: "flex" }}>
         {/* gutter */}
         <div style={{ width: gutterW, flexShrink: 0, background: "var(--editor-gutter)", paddingTop: padT, textAlign: "right", userSelect: "none", borderRight: "1px solid var(--editor-line)" }}>
-          {lines.map((_, i) => (
-            <div key={i} style={{ height: lineH, lineHeight: lineH + "px", paddingRight: 10, color: "var(--tx-on-dark-3)", fontSize: 12.5 }}>{i + 1}</div>
+          {Array.from({ length: rows }, (_, i) => (
+            <div key={i} style={{ height: lineH, lineHeight: lineH + "px", paddingRight: 10, color: i < lines.length ? "var(--tx-on-dark-3)" : "transparent", fontSize: 12.5 }}>{i + 1}</div>
           ))}
         </div>
-        {/* code area */}
-        <div style={{ position: "relative", flex: 1, paddingTop: padT, paddingLeft: padL }}>
+        {/* code area: textarea(상단, 입력) + pre(하단, 하이라이트) 완전 겹침 */}
+        <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
           <pre aria-hidden="true" style={{
-            margin: 0, fontFamily: "var(--font-mono)", fontSize: 14, lineHeight: lineH + "px",
-            whiteSpace: "pre", color: "var(--syn-op)", pointerEvents: "none",
+            ...layer, position: "absolute", top: 0, left: 0, right: 0, bottom: 0,
+            color: "var(--syn-op)", pointerEvents: "none", overflow: "hidden",
           }}>{highlight(expr)}{"\n"}</pre>
-          <textarea ref={taRef} value={expr} spellCheck={false}
+          <textarea ref={taRef} value={expr} spellCheck={false} rows={rows}
+            className="code-ta"
             onChange={(e) => { setExpr(e.target.value); updateAc(e.target); }}
             onClick={(e) => updateAc(e.target)}
             onKeyDown={onKey}
             onBlur={() => setTimeout(() => setAc(null), 120)}
             style={{
-              position: "absolute", top: padT, left: padL, right: 0, bottom: 0, width: "calc(100% - " + padL + "px)",
-              margin: 0, padding: 0, border: "none", outline: "none", resize: "none", overflow: "hidden",
+              ...layer, position: "relative", display: "block", width: "100%",
+              outline: "none", resize: "none", overflow: "hidden",
               background: "transparent", color: "transparent", caretColor: "var(--accent-hi)",
-              fontFamily: "var(--font-mono)", fontSize: 14, lineHeight: lineH + "px", whiteSpace: "pre",
             }} />
           {/* autocomplete */}
           {ac && (

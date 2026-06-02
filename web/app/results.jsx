@@ -85,29 +85,6 @@ function Pill({ icon, children, tone }) {
   );
 }
 
-function PeriodToggle() {
-  const [p, setP] = React.useState("IS");
-  const opts = ["TRAIN", "TEST", "IS", "OS"];
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-      <span style={{ fontSize: 12.5, color: "var(--tx-on-light-2)", fontWeight: 600 }}>Period</span>
-      <div style={{ display: "flex", background: "var(--res-alt)", borderRadius: 18, padding: 3, border: "1px solid var(--res-line)" }}>
-        {opts.map((o) => {
-          const on = o === p;
-          const disabled = o === "OS";
-          return (
-            <button key={o} onClick={() => !disabled && setP(o)} style={{
-              padding: "5px 15px", borderRadius: 15, fontSize: 12, fontWeight: 700, letterSpacing: 0.5,
-              background: on ? "var(--cool)" : "transparent", color: on ? "#fff" : disabled ? "var(--tx-on-light-3)" : "var(--tx-on-light-2)",
-              opacity: disabled ? 0.5 : 1, cursor: disabled ? "default" : "pointer",
-            }}>{o}</button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
 function ChartSelect() {
   const [v, setV] = React.useState("PnL");
   const [open, setOpen] = React.useState(false);
@@ -135,8 +112,7 @@ function ChartSelect() {
   );
 }
 
-function YearTable({ tweaks }) {
-  const D = window.AB_DATA;
+function YearTable({ rows }) {
   const cols = ["Year", "Sharpe", "Turnover", "Fitness", "Returns", "Drawdown", "Margin", "Long", "Short"];
   return (
     <div style={{ border: "1px solid var(--res-line)", borderRadius: "var(--r-md)", overflowX: "auto" }}>
@@ -149,13 +125,13 @@ function YearTable({ tweaks }) {
           </tr>
         </thead>
         <tbody>
-          {D.yearRows.map((r, i) => (
-            <tr key={r.year} style={{ background: i % 2 ? "var(--res-alt)" : "#fff", borderLeft: r.year === 2023 ? "3px solid var(--accent)" : "3px solid transparent" }}>
+          {(rows || []).map((r, i) => (
+            <tr key={r.year} style={{ background: i % 2 ? "var(--res-alt)" : "#fff" }}>
               <td style={{ padding: "11px 16px", fontWeight: 700, color: "var(--tx-on-light)" }}>{r.year}</td>
               <td style={cellR(r.sharpe >= 1 ? "var(--up)" : "var(--tx-on-light)")}>{r.sharpe.toFixed(2)}</td>
               <td style={cellR()}>{fmtPctRaw(r.turnover)}</td>
               <td style={cellR()}>{r.fitness.toFixed(2)}</td>
-              <td style={cellR("var(--up)")}>{fmtPctRaw(r.returns)}</td>
+              <td style={cellR(r.returns >= 0 ? "var(--up)" : "var(--down)")}>{fmtPctRaw(r.returns)}</td>
               <td style={cellR("var(--down)")}>{fmtPctRaw(r.drawdown)}</td>
               <td style={cellR()}>{fmtPermil(r.margin)}</td>
               <td style={cellR()}>{r.long}</td>
@@ -169,9 +145,12 @@ function YearTable({ tweaks }) {
 }
 function cellR(color) { return { padding: "11px 16px", textAlign: "right", color: color || "var(--tx-on-light-2)" }; }
 
-function DoneResults({ tweaks }) {
-  const D = window.AB_DATA, s = D.isSummary;
+function DoneResults({ result, tweaks }) {
+  const D = result || window.AB_DATA;
+  const s = D.isSummary;
+  if (!s) return <EmptyResults />;
   const cardStyle = tweaks.resultsStyle === "cards";
+  const rangeLabel = (D.start && D.end) ? `${D.start} ~ ${D.end}` : null;
   return (
     <div className="fadeUp" style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
       <div style={{ padding: "20px 26px 40px", minWidth: 0 }}>
@@ -184,20 +163,18 @@ function DoneResults({ tweaks }) {
         </div>
         <LineChart values={D.pnlScaled} labels={D.monthLabels} height={300} color="var(--accent)"
           yFmt={(v) => (v >= 1000 ? (v / 1000).toFixed(0) + "K" : v.toFixed(0))} />
-        {/* range slider */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-          <div style={{ flex: 1, height: 18, borderRadius: 9, background: "var(--res-alt)", border: "1px solid var(--res-line)", position: "relative" }}>
-            <div style={{ position: "absolute", left: "2%", right: "2%", top: 3, bottom: 3, borderRadius: 7, background: "#cfd6e0" }} />
-          </div>
-          <button style={{ width: 26, height: 26, borderRadius: "50%", background: "var(--cool)", color: "#fff", display: "grid", placeItems: "center" }}><Icon name="help" size={14} /></button>
-        </div>
 
         {/* IS summary header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "30px 0 16px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "30px 0 16px", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 19, fontWeight: 700 }}>
             <Icon name="bars" size={19} style={{ color: "var(--accent-lo)" }} /> IS Summary
           </div>
-          <PeriodToggle />
+          {rangeLabel && (
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12.5, color: "var(--tx-on-light-2)", fontWeight: 600 }}>
+              <Icon name="doc" size={14} style={{ color: "var(--tx-on-light-3)" }} />
+              백테스트 기간 <span className="tabnum" style={{ color: "var(--tx-on-light)" }}>{rangeLabel}</span>
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
           <Pill tone="warn">{s.sharpe >= 1.3 ? "Production Ready" : "Needs Improvement"}</Pill>
@@ -217,14 +194,12 @@ function DoneResults({ tweaks }) {
           <MetricItem label="Sharpe" value={s.sharpe.toFixed(2)} color="var(--up)" />
           <MetricItem label="Turnover" value={fmtPctRaw(s.turnover, 0)} />
           <MetricItem label="Fitness" value={s.fitness.toFixed(2)} />
-          <MetricItem label="Returns" value={fmtPctRaw(s.returns)} color="var(--up)" />
+          <MetricItem label="Returns" value={fmtPctRaw(s.returns)} color={s.returns >= 0 ? "var(--up)" : "var(--down)"} />
           <MetricItem label="Drawdown" value={fmtPctRaw(s.drawdown)} color="var(--down)" />
           <MetricItem label="Margin" value={fmtPermil(s.margin)} />
-          <div style={{ flex: 1 }} />
-          <button style={{ color: "var(--tx-on-light-3)" }}><Icon name="chevU" size={20} /></button>
         </div>
 
-        <YearTable tweaks={tweaks} />
+        <YearTable rows={D.yearRows} />
 
         {/* secondary metrics */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginTop: 20 }}>
@@ -270,13 +245,13 @@ function ResultsBottomBar({ simState, onDry, onLive }) {
   );
 }
 
-function ResultsPane({ simState, progress, onDry, onLive, tweaks }) {
+function ResultsPane({ simState, progress, result, onDry, onLive, tweaks }) {
   return (
     <div style={{ display: "flex", height: "100%", background: "var(--res-bg)", minWidth: 0 }}>
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
         {simState === "idle" && <EmptyResults />}
         {simState === "running" && <RunningResults progress={progress} />}
-        {simState === "done" && <DoneResults tweaks={tweaks} />}
+        {simState === "done" && <DoneResults result={result} tweaks={tweaks} />}
         <ResultsBottomBar simState={simState} onDry={onDry} onLive={onLive} />
       </div>
     </div>

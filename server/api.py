@@ -505,7 +505,10 @@ async def api_backtest(req: Request):
         "win": m["win_rate"], "avgMaxWeight": m["avg_max_weight"], "nDays": m["n_days"],
         "annual": m["annual_return"],
     }
-    return {"isSummary": is_summary, "pnlScaled": pnl_scaled, "monthLabels": labels, "yearRows": year_rows}
+    start = pd.Timestamp(cum.index[0]).strftime("%Y-%m-%d") if len(cum) else ""
+    end = pd.Timestamp(cum.index[-1]).strftime("%Y-%m-%d") if len(cum) else ""
+    return {"isSummary": is_summary, "pnlScaled": pnl_scaled, "monthLabels": labels,
+            "yearRows": year_rows, "start": start, "end": end}
 
 
 def _fitness(m):

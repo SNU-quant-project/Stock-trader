@@ -86,6 +86,10 @@ input, select, textarea { font-family: inherit; }
 
 .tabnum { font-variant-numeric: tabular-nums; font-family: var(--font-num); }
 
+/* 코드 에디터: 텍스트가 투명이라 드래그 선택이 안 보이던 문제 → 선택 하이라이트 표시 */
+.code-ta::selection { background: rgba(80, 160, 255, 0.35); }
+.code-ta::-moz-selection { background: rgba(80, 160, 255, 0.35); }
+
 /* ---- app shell ---- */
 .app {
   height: 100%;
