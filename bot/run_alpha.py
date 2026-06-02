@@ -215,6 +215,11 @@ def main(dry_run=False):
     print("[4/6] 알파 계산...")
     current_csv = pd.read_csv(ROOT / "data" / "sp500_current.csv")
     sector_map = dict(zip(current_csv["Symbol"], current_csv["GICS Sector"]))
+    # 완전 섹터맵(08_fetch_sectors.py) 으로 보강 → 'Unknown' 최소화
+    sec_path = ROOT / "data" / "sp500_sectors.csv"
+    if sec_path.exists():
+        sec = pd.read_csv(sec_path)
+        sector_map.update(dict(zip(sec["Symbol"], sec["Sector"])))
     for s in members:
         sector_map.setdefault(s, "Unknown")
 

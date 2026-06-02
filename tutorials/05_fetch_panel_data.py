@@ -22,8 +22,9 @@ from alpaca.data.timeframe import TimeFrame
 from lib.sp500_universe import load_data, get_sp500_members_at
 
 # === 설정 ===
-START_DATE = "2025-05-20"
-END_DATE = "2026-05-19"
+# 백테스트 기간: 2023-01-01 ~ 오늘 (cron 이 매일 갱신하므로 종료일은 동적)
+START_DATE = "2023-01-01"
+END_DATE = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 BATCH_SIZE = 50
 OUTPUT_FILE = "data/sp500_panel.parquet"
 

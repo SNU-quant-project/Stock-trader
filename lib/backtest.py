@@ -20,7 +20,12 @@ ROOT = Path(__file__).parent.parent
 
 
 def load_backtest_data():
-    """price panel + fundamentals + sector_map 로드."""
+    """price panel + fundamentals + sector_map 로드.
+
+    sector_map: 현재 멤버는 GICS Sector, 방출/누락 종목은 sp500_sectors.csv
+    (08_fetch_sectors.py 산출물, yfinance 로 보강 + GICS 명칭 정규화) 로 채운다.
+    → 백테스트 union 유니버스에 'Unknown' 섹터가 남지 않게 한다.
+    """
     panel = pd.read_parquet(ROOT / "data" / "sp500_panel.parquet")
     try:
         fundamentals = pd.read_parquet(ROOT / "data" / "sp500_fundamentals.parquet")
@@ -28,6 +33,11 @@ def load_backtest_data():
         fundamentals = pd.DataFrame()
     current = pd.read_csv(ROOT / "data" / "sp500_current.csv")
     sector_map = dict(zip(current["Symbol"], current["GICS Sector"]))
+    sec_path = ROOT / "data" / "sp500_sectors.csv"
+    if sec_path.exists():
+        sec = pd.read_csv(sec_path)
+        # 완전 섹터맵을 우선 적용 (현재 멤버 + 방출 종목 모두 포함)
+        sector_map.update(dict(zip(sec["Symbol"], sec["Sector"])))
     return panel, fundamentals, sector_map
 
 
@@ -105,10 +115,29 @@ def compute_metrics(returns, weights):
     }
 
 
+def _build_panel_membership_mask(panel):
+    """패널의 거래일 × 종목 기준 PIT 멤버십 마스크 (편입 전/방출 후 = False)."""
+    from .sp500_universe import load_data, build_membership_mask
+
+    close = panel["close"].unstack(level="symbol")
+    idx = close.index.normalize()
+    if getattr(idx, "tz", None) is not None:
+        idx = idx.tz_localize(None)
+    dates, symbols = idx, close.columns
+    current_symbols, changes = load_data(str(ROOT / "data"))
+    return build_membership_mask(dates, symbols, current_symbols, changes)
+
+
 def backtest_alpha(expression, settings):
-    """식과 세팅을 받아 metrics dict 반환. 사이트에서 호출하는 진입점."""
+    """식과 세팅을 받아 metrics dict 반환. 사이트에서 호출하는 진입점.
+
+    PIT 유니버스: 그날 S&P 500 멤버가 아니던 구간은 비중 0 으로 처리.
+    (편입 전 = 미보유, 방출 후 = 청산)
+    """
     panel, fundamentals, sector_map = load_backtest_data()
-    weights = evaluate(expression, panel, fundamentals, sector_map, settings, return_full=True)
+    mask = _build_panel_membership_mask(panel)
+    weights = evaluate(expression, panel, fundamentals, sector_map, settings,
+                       return_full=True, universe_mask=mask)
     delay = int(settings.get("delay", 1))
     returns = run_backtest(weights, panel, delay=delay)
     metrics = compute_metrics(returns, weights)

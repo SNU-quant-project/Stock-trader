@@ -66,8 +66,13 @@ def _build_pit_fundamentals(fundamentals, dates, symbols, fallback_lag=FALLBACK_
     return result
 
 
-def build_namespace(panel, fundamentals, sector_series):
-    """eval 에 넘길 변수 namespace 만들기."""
+def build_namespace(panel, fundamentals, sector_series, universe_mask=None):
+    """eval 에 넘길 변수 namespace 만들기.
+
+    universe_mask: (date × symbol) bool DataFrame (선택). 주어지면 비멤버 구간의
+    모든 가격/펀더멘털 값을 NaN 으로 가려 point-in-time 유니버스를 재현한다.
+    (편입 전 = 데이터 없음, 방출 후 = 청산되어 거래 대상 제외)
+    """
     close = panel["close"].unstack(level="symbol")
     open_ = panel["open"].unstack(level="symbol")
     high = panel["high"].unstack(level="symbol") if "high" in panel.columns else close
@@ -131,6 +136,16 @@ def build_namespace(panel, fundamentals, sector_series):
         "pd": pd,
     }
     ns.update(fund_broadcast)
+
+    # === point-in-time 유니버스 마스킹 ===
+    # 비멤버 구간(편입 전 / 방출 후)의 (date × symbol) 값을 NaN 으로 가린다.
+    # → rank·neutralize·normalize 가 그 시점 멤버만 보고, 방출 종목은 비중 0(청산).
+    if universe_mask is not None:
+        m = universe_mask.reindex(index=dates, columns=symbols, fill_value=False)
+        for key, val in list(ns.items()):
+            if isinstance(val, pd.DataFrame) and val.shape == (len(dates), len(symbols)):
+                ns[key] = val.where(m)
+
     ns.update(ops.ALL_OPS)
     return ns
 
@@ -202,7 +217,8 @@ def _evaluate_expression(expression, ns):
         raise ValueError("마지막 줄에서 결과 추출 실패 — `alpha = ...` 으로 끝내거나 마지막 줄을 표현식으로")
 
 
-def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_full=False):
+def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_full=False,
+             universe_mask=None):
     """expression 을 평가해서 weight 반환.
 
     settings:
@@ -211,12 +227,16 @@ def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_
       - truncation: float (0.0~0.20, 0=skip)
       - delay: 1 (기본; D-1 데이터로 D 진입)
 
+    universe_mask: (date × symbol) bool DataFrame (선택, 백테스트용).
+        비멤버 구간을 NaN 으로 가려 PIT 유니버스 재현. None 이면 패널 전체 사용
+        (라이브 봇은 이미 현재 멤버만 패널에 담으므로 불필요).
+
     return_full=False (기본): 마지막 거래일 Series 반환
     return_full=True: 전체 날짜 DataFrame 반환 (백테스팅용)
     """
     settings = settings or {}
     sector_series = pd.Series(sector_map, name="sector")
-    ns = build_namespace(panel, fundamentals, sector_series)
+    ns = build_namespace(panel, fundamentals, sector_series, universe_mask=universe_mask)
 
     # === 1. 식 평가 (multi-line 지원) ===
     raw = _evaluate_expression(expression, ns)
