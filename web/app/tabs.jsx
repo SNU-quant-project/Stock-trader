@@ -189,7 +189,12 @@ function WinnersLosers() {
         <tbody>
           {rows.map((r) => (
             <tr key={r.sym} style={{ borderBottom: "1px solid #f0f2f6" }}>
-              <td style={{ padding: "6px 4px", fontWeight: 700 }}>{r.sym}</td>
+              <td style={{ padding: "6px 4px", fontWeight: 700 }}>
+                <a href={`https://finance.yahoo.com/quote/${r.sym}/`} target="_blank" rel="noopener noreferrer"
+                   style={{ color: "var(--tx-on-light)", textDecoration: "none" }}
+                   onMouseEnter={(e) => { e.currentTarget.style.color = "var(--cool)"; e.currentTarget.style.textDecoration = "underline"; }}
+                   onMouseLeave={(e) => { e.currentTarget.style.color = "var(--tx-on-light)"; e.currentTarget.style.textDecoration = "none"; }}>{r.sym}</a>
+              </td>
               <td style={{ padding: "6px 4px" }}><span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: r.qty >= 0 ? "var(--cool-soft)" : "#fdeceb", color: r.qty >= 0 ? "var(--cool)" : "var(--down)" }}>{r.qty >= 0 ? "LONG" : "SHORT"}</span></td>
               <td className="tabnum" style={{ padding: "6px 4px", textAlign: "right", color: r.pl >= 0 ? "var(--up)" : "var(--down)", fontWeight: 600 }}>{fmtUSD0(r.pl)} ({fmtPct(r.plpc, 1)})</td>
             </tr>
