@@ -525,7 +525,8 @@ async def api_backtest(req: Request):
     year_rows = _year_rows_from_returns(rets, m)
 
     is_summary = {
-        "sharpe": m["sharpe"], "turnover": m["avg_turnover"], "fitness": _fitness(m),
+        "sharpe": m["sharpe"], "turnover": m["avg_turnover"],
+        "fitness": _fitness(m["total_return"], m["sharpe"], m["avg_turnover"]),
         "returns": m["total_return"], "drawdown": abs(m["mdd"]), "margin": m["total_return"] / max(m["avg_turnover"], 1e-6) / 100,
         "win": m["win_rate"], "avgMaxWeight": m["avg_max_weight"], "nDays": m["n_days"],
         "annual": m["annual_return"],
@@ -536,35 +537,41 @@ async def api_backtest(req: Request):
             "yearRows": year_rows, "start": start, "end": end}
 
 
-def _fitness(m):
+def _fitness(returns, sharpe, turnover):
+    """WorldQuant Brain 방식:
+        Fitness = Sharpe * sqrt( |Returns| / max(Turnover, 0.125) )
+    Sharpe 는 부호 유지(나쁜 알파는 음수), turnover 하한 0.125.
+    returns/turnover 는 소수 비율 (0.14 = 14%, 1.30 = 130%).
+    """
     import math
-    tv = max(m["avg_turnover"], 0.01)
-    return round(abs(m["sharpe"]) * math.sqrt(abs(m["annual_return"]) / tv), 2) if tv else 0
+    tv = max(abs(turnover), 0.125)
+    return round(sharpe * math.sqrt(abs(returns) / tv), 2)
 
 
 def _year_rows_from_returns(rets, m):
-    """returns Series 를 연도별로 집계."""
+    """returns Series 를 연도별로 집계. fitness/sharpe/returns 모두 해당 연도 값으로."""
     import numpy as np
     rows = []
     s = rets.copy()
     s.index = pd.to_datetime(s.index)
+    tv = m["avg_turnover"]  # 연도별 turnover 는 별도 산출 불가 → 전체 평균 사용
     for year, grp in s.groupby(s.index.year):
         if len(grp) < 2:
             continue
-        cum = (1 + grp).prod() - 1
-        sharpe = grp.mean() / grp.std() * np.sqrt(252) if grp.std() > 0 else 0
+        cum = float((1 + grp).prod() - 1)
+        sharpe = float(grp.mean() / grp.std() * np.sqrt(252)) if grp.std() > 0 else 0.0
         run = (1 + grp).cumprod()
         dd = ((run - run.cummax()) / run.cummax()).min()
         rows.append({
-            "year": int(year), "sharpe": round(float(sharpe), 2),
-            "turnover": float(m["avg_turnover"]), "fitness": _fitness(m),
-            "returns": float(cum), "drawdown": abs(float(dd)),
-            "margin": float(cum) / max(m["avg_turnover"], 1e-6) / 100,
+            "year": int(year), "sharpe": round(sharpe, 2),
+            "turnover": float(tv), "fitness": _fitness(cum, sharpe, tv),
+            "returns": cum, "drawdown": abs(float(dd)),
+            "margin": cum / max(tv, 1e-6) / 100,
             "long": int(m.get("n_long", 0)) or 250, "short": int(m.get("n_short", 0)) or 250,
         })
     return rows or [{
         "year": datetime.now().year, "sharpe": round(m["sharpe"], 2),
-        "turnover": m["avg_turnover"], "fitness": _fitness(m),
+        "turnover": m["avg_turnover"], "fitness": _fitness(m["total_return"], m["sharpe"], m["avg_turnover"]),
         "returns": m["total_return"], "drawdown": abs(m["mdd"]),
         "margin": m["total_return"] / max(m["avg_turnover"], 1e-6) / 100, "long": 250, "short": 250,
     }]
