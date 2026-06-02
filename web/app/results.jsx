@@ -140,26 +140,25 @@ function Pill({ icon, children, tone }) {
   );
 }
 
-function ChartSelect() {
-  const [v, setV] = React.useState("PnL");
+const CHART_OPTS = ["PnL", "Cumulative Return", "Drawdown", "Daily Return"];
+function ChartSelect({ value, onChange }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef(null);
   React.useEffect(() => {
     const h = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener("mousedown", h); return () => document.removeEventListener("mousedown", h);
   }, []);
-  const opts = ["PnL", "Cumulative Return", "Drawdown", "Daily Return"];
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button onClick={() => setOpen((o) => !o)} style={{
         display: "flex", alignItems: "center", justifyContent: "space-between", gap: 30, minWidth: 220,
         padding: "9px 14px", border: "1px solid var(--res-line)", borderRadius: "var(--r-sm)",
         background: "#fff", color: "var(--tx-on-light)", fontSize: 14, fontWeight: 500,
-      }}>{v}<Icon name="chevD" size={16} style={{ color: "var(--tx-on-light-3)" }} /></button>
+      }}>{value}<Icon name="chevD" size={16} style={{ color: "var(--tx-on-light-3)" }} /></button>
       {open && (
         <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, left: 0, zIndex: 20, background: "#fff", border: "1px solid var(--res-line)", borderRadius: "var(--r-sm)", boxShadow: "0 12px 30px rgba(0,0,0,0.12)", overflow: "hidden" }}>
-          {opts.map((o) => (
-            <button key={o} onClick={() => { setV(o); setOpen(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", fontSize: 13.5, color: o === v ? "var(--accent-lo)" : "var(--tx-on-light)", background: o === v ? "var(--accent-soft)" : "#fff", fontWeight: o === v ? 600 : 400 }}>{o}</button>
+          {CHART_OPTS.map((o) => (
+            <button key={o} onClick={() => { onChange(o); setOpen(false); }} style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 14px", fontSize: 13.5, color: o === value ? "var(--accent-lo)" : "var(--tx-on-light)", background: o === value ? "var(--accent-soft)" : "#fff", fontWeight: o === value ? 600 : 400 }}>{o}</button>
           ))}
         </div>
       )}
@@ -203,9 +202,21 @@ function cellR(color) { return { padding: "11px 16px", textAlign: "right", color
 function DoneResults({ result, tweaks }) {
   const D = result || window.AB_DATA;
   const s = D.isSummary;
+  const [chartType, setChartType] = React.useState("PnL");
   if (!s) return <EmptyResults />;
   const cardStyle = tweaks.resultsStyle === "cards";
   const rangeLabel = (D.start && D.end) ? `${D.start} ~ ${D.end}` : null;
+
+  // 선택된 차트 시계열 + 색/포맷
+  const charts = D.charts || { PnL: D.pnlScaled };
+  const series = charts[chartType] || charts.PnL || [];
+  const chartStyle = {
+    "PnL": { color: "var(--accent)", fmt: (v) => "$" + (Math.abs(v) >= 1000 ? (v / 1000).toFixed(0) + "K" : v.toFixed(0)) },
+    "Cumulative Return": { color: "var(--accent)", fmt: (v) => v.toFixed(0) + "%" },
+    "Drawdown": { color: "var(--down)", fmt: (v) => v.toFixed(0) + "%" },
+    "Daily Return": { color: "var(--cool)", fmt: (v) => v.toFixed(1) + "%" },
+  }[chartType] || { color: "var(--accent)", fmt: (v) => v.toFixed(0) };
+
   return (
     <div className="fadeUp" style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
       <div style={{ padding: "20px 26px 40px", minWidth: 0 }}>
@@ -214,10 +225,10 @@ function DoneResults({ result, tweaks }) {
           <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 19, fontWeight: 700, color: "var(--tx-on-light)" }}>
             <Icon name="chart" size={20} style={{ color: "var(--accent-lo)" }} /> Chart
           </div>
-          <ChartSelect />
+          <ChartSelect value={chartType} onChange={setChartType} />
         </div>
-        <LineChart values={D.pnlScaled} labels={D.monthLabels} height={300} color="var(--accent)"
-          yFmt={(v) => (v >= 1000 ? (v / 1000).toFixed(0) + "K" : v.toFixed(0))} />
+        <LineChart key={chartType} values={series} labels={D.monthLabels} height={300}
+          color={chartStyle.color} yFmt={chartStyle.fmt} />
 
         {/* IS summary header */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "30px 0 16px", flexWrap: "wrap", gap: 8 }}>

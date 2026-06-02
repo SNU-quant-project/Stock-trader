@@ -514,14 +514,24 @@ async def api_backtest(req: Request):
         return JSONResponse({"error": m["error"]}, status_code=400)
 
     cum = m["cumulative"]  # pandas Series (1 + ret).cumprod()
-    pnl_scaled = [float(v) * 1000 for v in cum.values]  # 시작 1000 기준
+    rets = m["returns"]
+    dd = m["drawdown"]
+    pnl_scaled = [float(v) * 1000 for v in cum.values]  # 시작 1000 기준 (하위호환)
     labels = [pd.Timestamp(d).strftime("%b '%y") for d in cum.index]
     # 라벨 너무 많으면 솎기 (월 단위 근사)
     if len(labels) > 60:
         step = len(labels) // 60 + 1
         labels = [lb if i % step == 0 else "" for i, lb in enumerate(labels)]
 
-    rets = m["returns"]
+    # 차트 4종 시계열 (모두 cum.index 와 길이 동일)
+    BOOK = 1_000_000  # PnL 표시용 가정 북사이즈 $1M
+    charts = {
+        "PnL": [round((float(v) - 1) * BOOK, 2) for v in cum.values],               # 누적 손익 ($)
+        "Cumulative Return": [round((float(v) - 1) * 100, 4) for v in cum.values],   # 누적 수익률 (%)
+        "Drawdown": [round(float(d) * 100, 4) for d in dd.reindex(cum.index).fillna(0).values],  # 낙폭 (%)
+        "Daily Return": [round(float(r) * 100, 4) for r in rets.reindex(cum.index).fillna(0).values],  # 일수익률 (%)
+    }
+
     year_rows = _year_rows_from_returns(rets, m)
 
     is_summary = {
@@ -534,8 +544,8 @@ async def api_backtest(req: Request):
     }
     start = pd.Timestamp(cum.index[0]).strftime("%Y-%m-%d") if len(cum) else ""
     end = pd.Timestamp(cum.index[-1]).strftime("%Y-%m-%d") if len(cum) else ""
-    return {"isSummary": is_summary, "pnlScaled": pnl_scaled, "monthLabels": labels,
-            "yearRows": year_rows, "start": start, "end": end}
+    return {"isSummary": is_summary, "pnlScaled": pnl_scaled, "charts": charts,
+            "monthLabels": labels, "yearRows": year_rows, "start": start, "end": end}
 
 
 def _fitness(ann_returns, sharpe, turnover):
