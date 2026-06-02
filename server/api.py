@@ -527,9 +527,10 @@ async def api_backtest(req: Request):
     is_summary = {
         "sharpe": m["sharpe"], "turnover": m["avg_turnover"],
         "fitness": _fitness(m["annual_return"], m["sharpe"], m["avg_turnover"]),
-        "returns": m["total_return"], "drawdown": abs(m["mdd"]), "margin": m["total_return"] / max(m["avg_turnover"], 1e-6) / 100,
+        "returns": m["annual_return"],  # 연율화 수익률 (Brain 동일)
+        "drawdown": abs(m["mdd"]), "margin": m["annual_return"] / max(m["avg_turnover"], 1e-6) / 100,
         "win": m["win_rate"], "avgMaxWeight": m["avg_max_weight"], "nDays": m["n_days"],
-        "annual": m["annual_return"],
+        "total": m["total_return"],  # 기간 총 수익률 (보조 카드)
     }
     start = pd.Timestamp(cum.index[0]).strftime("%Y-%m-%d") if len(cum) else ""
     end = pd.Timestamp(cum.index[-1]).strftime("%Y-%m-%d") if len(cum) else ""
@@ -568,8 +569,8 @@ def _year_rows_from_returns(rets, m):
         rows.append({
             "year": int(year), "sharpe": round(sharpe, 2),
             "turnover": float(tv), "fitness": _fitness(ann, sharpe, tv),
-            "returns": cum, "drawdown": abs(float(dd)),
-            "margin": cum / max(tv, 1e-6) / 100,
+            "returns": ann, "drawdown": abs(float(dd)),  # 연율화
+            "margin": ann / max(tv, 1e-6) / 100,
             "long": int(m.get("n_long", 0)) or 250, "short": int(m.get("n_short", 0)) or 250,
         })
     return rows or [{

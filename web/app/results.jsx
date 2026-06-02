@@ -203,7 +203,7 @@ function DoneResults({ result, tweaks }) {
 
         {/* secondary metrics */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginTop: 20 }}>
-          {[["Annual Return", fmtPct(s.annual), "var(--up)"], ["Win Rate", fmtPctRaw(s.win), null], ["Avg Max Weight", fmtPctRaw(s.avgMaxWeight), null], ["Trading Days", s.nDays + "일", null]].map(([l, v, c]) => (
+          {[["Total Return", fmtPct(s.total != null ? s.total : 0), (s.total >= 0 ? "var(--up)" : "var(--down)")], ["Win Rate", fmtPctRaw(s.win), null], ["Avg Max Weight", fmtPctRaw(s.avgMaxWeight), null], ["Trading Days", s.nDays + "일", null]].map(([l, v, c]) => (
             <div key={l} style={{ border: "1px solid var(--res-line)", borderRadius: "var(--r-md)", padding: "13px 16px" }}>
               <div style={{ fontSize: 11.5, color: "var(--tx-on-light-2)" }}>{l}</div>
               <div className="tabnum" style={{ fontSize: 20, fontWeight: 600, marginTop: 4, color: c || "var(--tx-on-light)" }}>{v}</div>
