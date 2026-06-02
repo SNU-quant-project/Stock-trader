@@ -84,22 +84,29 @@ def get_account_block():
     except Exception:
         pass
 
-    # 포지션 — 종가(lastday_price) 기준으로 가격·P&L 계산.
-    # 실시간 current_price 는 장외 stale/오류 quote(예: BNY $10)를 물 수 있어 종가로 통일.
+    # 포지션 P&L:
+    #   장 중   → 실시간 current_price (Alpaca 가 주는 live market value/PL 그대로)
+    #   장 마감 → 종가 lastday_price 로 재계산 (장외 stale/오류 quote, 예: BNY $10 회피)
     longs, shorts = [], []
     try:
         for p in tc.get_all_positions():
             qty = float(p.qty)
             entry = float(p.avg_entry_price)
-            close_px = float(p.lastday_price) if p.lastday_price else float(p.current_price or 0)
-            mv = close_px * qty
-            pl = (close_px - entry) * qty
-            cost = abs(entry * qty)
-            plpc = pl / cost if cost else 0
+            if market_open:
+                px = float(p.current_price or 0)
+                mv = float(p.market_value)
+                pl = float(p.unrealized_pl)
+                plpc = float(p.unrealized_plpc)
+            else:
+                px = float(p.lastday_price) if p.lastday_price else float(p.current_price or 0)
+                mv = px * qty
+                pl = (px - entry) * qty
+                cost = abs(entry * qty)
+                plpc = pl / cost if cost else 0
             info = cmap.get(p.symbol, {"name": p.symbol, "sector": "Unknown"})
             row = {
                 "sym": p.symbol, "name": info["name"], "sector": info["sector"],
-                "qty": qty, "price": close_px, "marketValue": mv,
+                "qty": qty, "price": px, "marketValue": mv,
                 "pl": pl, "plpc": plpc,
             }
             (longs if qty >= 0 else shorts).append(row)
@@ -178,8 +185,12 @@ def _todays_close_from_intraday(tc):
         return None
 
 
-def get_portfolio_history():
-    """acctHist + dailyPerf (일별 종가, naive-UTC 날짜). 1D 가 당일 누락 시 intraday 로 보완."""
+def get_portfolio_history(market_open=False, live_equity=None):
+    """acctHist + dailyPerf (일별, naive-UTC 날짜).
+    과거일은 종가. 당일은 1D 가 누락하므로 intraday 로 보완:
+      장 중   → 실시간 live_equity (현재 시장가 기준)
+      장 마감 → intraday 정규장 마감 종가
+    """
     try:
         from alpaca.trading.requests import GetPortfolioHistoryRequest
         tc = _trading_client()
@@ -192,11 +203,17 @@ def get_portfolio_history():
         dates = list(df["d"])
         equities = [float(x) for x in df["equity"]]
 
-        # 1D 시리즈에 당일 종가가 없으면 intraday 에서 보완
+        # 1D 시리즈에 당일이 없으면 intraday 로 당일 포인트 보완
         today_close = _todays_close_from_intraday(tc)
-        if today_close and today_close[0] not in dates:
-            dates.append(today_close[0])
-            equities.append(today_close[1])
+        if today_close:
+            d, eq = today_close
+            if market_open and live_equity:
+                eq = float(live_equity)  # 장 중엔 현재 시장가 기준 실시간 equity
+            if d not in dates:
+                dates.append(d)
+                equities.append(eq)
+            elif market_open and live_equity:
+                equities[-1] = float(live_equity)
 
         fmt = "%m/%d" if os.name == "nt" else "%-m/%-d"
         labels = [d.strftime(fmt) for d in dates]
@@ -420,14 +437,18 @@ def api_data():
     out["news"] = get_news()
     out["aiSummary"] = []  # ANTHROPIC_API_KEY 없으면 빈 배열 (프론트가 헤드라인으로 폴백)
     out["botLogs"] = get_bot_logs()
-    acct_hist, daily = get_portfolio_history()
+    acct = out.get("account") or {}
+    mkt_open = bool(acct.get("marketOpen"))
+    live_eq = acct.get("liveEquity")
+
+    # 당일 포인트: 장 중 → 실시간 equity, 장 마감 → intraday 종가
+    acct_hist, daily = get_portfolio_history(market_open=mkt_open, live_equity=live_eq)
     out["acctHist"] = acct_hist
     out["dailyPerf"] = daily
 
-    # 장 닫혔을 때 상단 칩의 일별수익률 = 마지막 거래일 종가 vs 그 전 거래일 종가
-    # (장중 stale quote 기반 실시간 equity 대신, 일별 표와 동일한 종가 기준으로 일치시킴)
-    acct = out.get("account")
-    if acct and not acct.get("marketOpen") and len(acct_hist) >= 2:
+    # 상단 Equity 카드 = acctHist 마지막 포인트와 일치시킴 (장중=실시간, 마감=종가)
+    # dailyReturn = 당일 포인트 vs 직전 거래일 종가
+    if acct and len(acct_hist) >= 2:
         last_c = acct_hist[-1]["equity"]
         prev_c = acct_hist[-2]["equity"]
         if prev_c:
