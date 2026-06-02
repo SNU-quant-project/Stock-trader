@@ -162,6 +162,94 @@ def _latest_prices():
     return cached("prices", 600, build)
 
 
+def _all_fills():
+    """계정 거래 시작 이후 모든 체결(FILL)을 종목별 매수/매도 현금흐름으로 집계.
+
+    Alpaca Activities REST(`/v2/account/activities`)를 page_token 으로 페이지네이션.
+    반환: (agg, start_date)
+      agg[sym] = {"buy": 매수금액합, "sell": 매도금액합}
+      start_date = 전체에서 가장 이른 체결일 (ISO)
+    """
+    import requests
+    base = "https://paper-api.alpaca.markets"
+    H = {"APCA-API-KEY-ID": os.environ["ALPACA_API_KEY"],
+         "APCA-API-SECRET-KEY": os.environ["ALPACA_SECRET_KEY"]}
+    agg = {}
+    start_date = ""
+    token = None
+    for _ in range(300):  # 안전 상한 (≈30000 체결)
+        params = {"activity_types": "FILL", "page_size": 100}
+        if token:
+            params["page_token"] = token
+        try:
+            acts = requests.get(f"{base}/v2/account/activities", headers=H,
+                                params=params, timeout=25).json()
+        except Exception:
+            break
+        if not isinstance(acts, list) or not acts:
+            break
+        for a in acts:
+            sym = a.get("symbol")
+            try:
+                cash = float(a["price"]) * float(a["qty"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            d = agg.setdefault(sym, {"buy": 0.0, "sell": 0.0})
+            if str(a.get("side", "")).lower().startswith("buy"):
+                d["buy"] += cash
+            else:
+                d["sell"] += cash
+            tt = a.get("transaction_time", "")
+            if tt and (not start_date or tt < start_date):
+                start_date = tt  # 가장 이른 체결일 (desc 페이징이라 점차 갱신)
+        token = acts[-1].get("id")
+        if len(acts) < 100 or not token:
+            break
+    return agg, start_date
+
+
+def get_pnl_by_symbol(market_open):
+    """거래 시작 이후 종목별 누적 손익(실현+미실현).
+
+    종목별 총손익 = 매도현금 + 현재포지션가치 - 매수현금
+      (실현분은 매수/매도 현금흐름으로, 미실현분은 현재 포지션 시가평가로 자동 포함.
+       롱/숏 모두 동일 식으로 성립.)
+    현재 포지션 가치: 장중=실시간 market_value, 마감=종가(lastday_price) 기준.
+    """
+    tc = _trading_client()
+    cmap = _company_map()
+    pos = {}
+    try:
+        for p in tc.get_all_positions():
+            qty = float(p.qty)
+            if market_open:
+                value = float(p.market_value)
+            else:
+                px = float(p.lastday_price) if p.lastday_price else float(p.current_price or 0)
+                value = px * qty
+            pos[p.symbol] = {"qty": qty, "value": value}
+    except Exception:
+        pass
+
+    agg, start_date = _all_fills()
+    rows = []
+    for sym in set(agg) | set(pos):
+        a = agg.get(sym, {"buy": 0.0, "sell": 0.0})
+        held = pos.get(sym)
+        value = held["value"] if held else 0.0
+        qty = held["qty"] if held else 0.0
+        pnl = a["sell"] + value - a["buy"]
+        basis = max(a["buy"], a["sell"], 1.0)
+        info = cmap.get(sym, {"name": sym, "sector": "Unknown"})
+        rows.append({
+            "sym": sym, "name": info["name"], "qty": qty,
+            "pl": pnl, "plpc": pnl / basis,
+            "held": abs(qty) > 1e-9,
+        })
+    rows.sort(key=lambda r: r["pl"], reverse=True)
+    return {"rows": rows, "startDate": start_date}
+
+
 def _todays_close_from_intraday(tc):
     """당일 정규장 마감(~16:00 ET = ~20:00 UTC) equity 를 intraday 에서 추출.
     Alpaca 1D 시리즈는 당일 종가를 하루 늦게 넣어주므로 보완용.
@@ -480,6 +568,21 @@ def api_data():
             acct["dailyReturn"] = (last_c - prev_c) / prev_c
             acct["equity"] = last_c
     return JSONResponse(out)
+
+
+@app.get("/api/pnl")
+def api_pnl():
+    """거래 시작 이후 종목별 누적 손익. 체결 페이지네이션이 무거워 별도 엔드포인트 + 캐시."""
+    market_open = False
+    try:
+        market_open = bool(_trading_client().get_clock().is_open)
+    except Exception:
+        pass
+    try:
+        data = cached(f"pnl_{market_open}", 900, lambda: get_pnl_by_symbol(market_open))
+    except Exception as e:
+        return JSONResponse({"rows": [], "startDate": "", "_err": str(e)})
+    return JSONResponse(data)
 
 
 @app.get("/api/config")

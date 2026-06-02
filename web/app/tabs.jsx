@@ -178,16 +178,34 @@ function PerformanceTab() {
 }
 
 function WinnersLosers() {
-  const D = window.AB_DATA;
-  const all = [...D.longs, ...D.shorts];
-  const winners = [...all].sort((a, b) => b.pl - a.pl).slice(0, 6);
-  const losers = [...all].sort((a, b) => a.pl - b.pl).slice(0, 6);
-  const tbl = (rows, color, label) => (
+  // 거래 시작 이후 종목별 누적 손익(실현+미실현). 체결 페이지네이션이 무거워 지연 로드.
+  const [data, setData] = React.useState(null);
+  React.useEffect(() => {
+    let alive = true;
+    fetch("/api/pnl").then((r) => r.json()).then((d) => { if (alive) setData(d); })
+      .catch(() => { if (alive) setData({ rows: [], startDate: "" }); });
+    return () => { alive = false; };
+  }, []);
+
+  const rows = (data && data.rows) || [];
+  const winners = rows.slice(0, 6);                         // 서버에서 pl 내림차순 정렬됨
+  const losers = [...rows].sort((a, b) => a.pl - b.pl).slice(0, 6);
+  const since = data && data.startDate ? data.startDate.slice(0, 10) : "";
+
+  const badge = (r) => {
+    const isShort = r.held && r.qty < 0;
+    const txt = !r.held ? "청산" : r.qty >= 0 ? "LONG" : "SHORT";
+    const bg = isShort ? "#fdeceb" : !r.held ? "var(--res-rail)" : "var(--cool-soft)";
+    const col = isShort ? "var(--down)" : !r.held ? "var(--tx-on-light-3)" : "var(--cool)";
+    return <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: bg, color: col }}>{txt}</span>;
+  };
+
+  const tbl = (list, color, label) => (
     <div>
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color }}>{label}</div>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
         <tbody>
-          {rows.map((r) => (
+          {list.map((r) => (
             <tr key={r.sym} style={{ borderBottom: "1px solid #f0f2f6" }}>
               <td style={{ padding: "6px 4px", fontWeight: 700 }}>
                 <a href={`https://finance.yahoo.com/quote/${r.sym}/`} target="_blank" rel="noopener noreferrer"
@@ -195,7 +213,7 @@ function WinnersLosers() {
                    onMouseEnter={(e) => { e.currentTarget.style.color = "var(--cool)"; e.currentTarget.style.textDecoration = "underline"; }}
                    onMouseLeave={(e) => { e.currentTarget.style.color = "var(--tx-on-light)"; e.currentTarget.style.textDecoration = "none"; }}>{r.sym}</a>
               </td>
-              <td style={{ padding: "6px 4px" }}><span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: r.qty >= 0 ? "var(--cool-soft)" : "#fdeceb", color: r.qty >= 0 ? "var(--cool)" : "var(--down)" }}>{r.qty >= 0 ? "LONG" : "SHORT"}</span></td>
+              <td style={{ padding: "6px 4px" }}>{badge(r)}</td>
               <td className="tabnum" style={{ padding: "6px 4px", textAlign: "right", color: r.pl >= 0 ? "var(--up)" : "var(--down)", fontWeight: 600 }}>{fmtUSD0(r.pl)} ({fmtPct(r.plpc, 1)})</td>
             </tr>
           ))}
@@ -203,13 +221,22 @@ function WinnersLosers() {
       </table>
     </div>
   );
+
   return (
     <Card>
-      <SectionTitle>종목별 손익 <span style={{ fontSize: 12, fontWeight: 500, color: "var(--tx-on-light-3)" }}>현재 보유 · 미실현</span></SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-        {tbl(winners, "var(--up)", "🟢 Top Winners")}
-        {tbl(losers, "var(--down)", "🔴 Top Losers")}
-      </div>
+      <SectionTitle>종목별 손익 <span style={{ fontSize: 12, fontWeight: 500, color: "var(--tx-on-light-3)" }}>
+        {since ? `${since} 거래 시작 이후 누적 · 실현+미실현` : "거래 시작 이후 누적 · 실현+미실현"}
+      </span></SectionTitle>
+      {!data ? (
+        <div style={{ padding: "26px 4px", color: "var(--tx-on-light-3)", fontSize: 13 }}>누적 손익 집계 중… (전체 체결 내역 불러오는 중)</div>
+      ) : rows.length === 0 ? (
+        <div style={{ padding: "26px 4px", color: "var(--tx-on-light-3)", fontSize: 13 }}>체결 내역이 없습니다.</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+          {tbl(winners, "var(--up)", "🟢 Top Winners")}
+          {tbl(losers, "var(--down)", "🔴 Top Losers")}
+        </div>
+      )}
     </Card>
   );
 }
