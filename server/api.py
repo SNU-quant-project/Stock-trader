@@ -155,8 +155,31 @@ def _latest_prices():
     return cached("prices", 600, build)
 
 
+def _todays_close_from_intraday(tc):
+    """당일 정규장 마감(~16:00 ET = ~20:00 UTC) equity 를 intraday 에서 추출.
+    Alpaca 1D 시리즈는 당일 종가를 하루 늦게 넣어주므로 보완용.
+    반환: (date, equity) 또는 None. (date 는 naive-UTC 기준, 1D 라벨과 일관)
+    """
+    try:
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+        h = tc.get_portfolio_history(history_filter=GetPortfolioHistoryRequest(period="1D", timeframe="1H"))
+        idf = pd.DataFrame({"ts": pd.to_datetime(h.timestamp, unit="s"), "equity": h.equity})
+        idf = idf[idf["equity"].notna() & (idf["equity"] > 0)]
+        if idf.empty:
+            return None
+        idf["d"] = idf["ts"].dt.date
+        today = idf["d"].max()
+        day = idf[idf["d"] == today]
+        # 정규장 종료(~20:00 UTC) 이내 값만 → 마감 시점. 없으면 마지막 값.
+        reg = day[day["ts"].dt.hour <= 20]
+        close_eq = float((reg if not reg.empty else day)["equity"].iloc[-1])
+        return today, close_eq
+    except Exception:
+        return None
+
+
 def get_portfolio_history():
-    """acctHist + dailyPerf (1M 일별 종가)."""
+    """acctHist + dailyPerf (일별 종가, naive-UTC 날짜). 1D 가 당일 누락 시 intraday 로 보완."""
     try:
         from alpaca.trading.requests import GetPortfolioHistoryRequest
         tc = _trading_client()
@@ -165,14 +188,25 @@ def get_portfolio_history():
         df = df[df["equity"].notna() & (df["equity"] > 0)].reset_index(drop=True)
         if df.empty:
             return [], []
-        df["date"] = df["ts"].dt.strftime("%-m/%-d") if os.name != "nt" else df["ts"].dt.strftime("%m/%d")
-        acct_hist = [{"date": r["date"], "equity": float(r["equity"])} for _, r in df.iterrows()]
+        df["d"] = df["ts"].dt.date
+        dates = list(df["d"])
+        equities = [float(x) for x in df["equity"]]
+
+        # 1D 시리즈에 당일 종가가 없으면 intraday 에서 보완
+        today_close = _todays_close_from_intraday(tc)
+        if today_close and today_close[0] not in dates:
+            dates.append(today_close[0])
+            equities.append(today_close[1])
+
+        fmt = "%m/%d" if os.name == "nt" else "%-m/%-d"
+        labels = [d.strftime(fmt) for d in dates]
+        acct_hist = [{"date": labels[i], "equity": equities[i]} for i in range(len(dates))]
         daily = []
-        for i in range(len(df) - 1, 0, -1):
-            eq, prev = df["equity"].iloc[i], df["equity"].iloc[i - 1]
-            daily.append({"date": acct_hist[i]["date"], "equity": float(eq),
-                          "pl": float(eq - prev), "ret": float(eq / prev - 1),
-                          "cum": float(eq / df["equity"].iloc[0] - 1)})
+        for i in range(len(equities) - 1, 0, -1):
+            eq, prev = equities[i], equities[i - 1]
+            daily.append({"date": labels[i], "equity": eq,
+                          "pl": eq - prev, "ret": eq / prev - 1 if prev else 0,
+                          "cum": eq / equities[0] - 1 if equities[0] else 0})
         return acct_hist, daily
     except Exception:
         return [], []
