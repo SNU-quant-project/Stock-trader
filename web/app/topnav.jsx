@@ -7,9 +7,10 @@ const NAV_TABS = [
   { id: "positions",   label: "Positions",   icon: "bars" },
   { id: "botlogs",     label: "Bot Logs",    icon: "doc" },
   { id: "news",        label: "News",        icon: "news" },
+  { id: "feedback",    label: "제안",        icon: "list" },
 ];
 
-function TopNav({ active, onChange }) {
+function TopNav({ active, onChange, onFeedback }) {
   const D = window.AB_DATA;
   const acct = D.account;
   return (
@@ -56,6 +57,15 @@ function TopNav({ active, onChange }) {
 
       {/* status + icons */}
       <div style={{ display: "flex", alignItems: "center", gap: 4, paddingRight: 14 }}>
+        <button onClick={onFeedback} title="이 사이트 개선 제안 남기기" style={{
+          display: "flex", alignItems: "center", gap: 6, padding: "0 13px", marginRight: 8,
+          height: 32, borderRadius: 16, background: "rgba(34,160,107,0.16)",
+          border: "1px solid rgba(40,184,123,0.35)", color: "#5fe0a6", fontSize: 12.5, fontWeight: 600,
+        }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(34,160,107,0.26)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(34,160,107,0.16)"; }}>
+          <span style={{ fontSize: 13 }}>💡</span> 개선 제안
+        </button>
         <div style={{
           display: "flex", alignItems: "center", gap: 8, padding: "0 14px", marginRight: 6,
           height: 32, borderRadius: 16, background: "rgba(255,255,255,0.05)",

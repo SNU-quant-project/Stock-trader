@@ -17,6 +17,7 @@ import re
 import sys
 import json
 import time
+import base64
 import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
@@ -38,6 +39,9 @@ from lib.sp500_universe import load_data as load_universe_data
 WEB_DIR = ROOT / "web"
 CONFIG_FILE = ROOT / "bot" / "alpha_config.json"
 LOG_DIR = ROOT / "bot" / "logs"
+FEEDBACK_DIR = ROOT / "bot" / "feedback"        # 팀원 개선 제안 저장 (gitignore)
+FEEDBACK_FILE = FEEDBACK_DIR / "feedback.jsonl"
+SHOTS_DIR = FEEDBACK_DIR / "shots"
 
 app = FastAPI(title="SNU Quant Alpha Bot API")
 
@@ -506,6 +510,96 @@ def read_config():
     return {"expression": "rank(-returns)",
             "settings": {"neutralization": "Sector", "decay": 0, "truncation": 0, "delay": 1},
             "description": ""}
+
+
+# ============ 개선 제안 (팀원 피드백) ============
+
+FEEDBACK_STATUS = ("new", "reviewing", "done")  # 접수 / 검토중 / 반영됨
+
+
+def _read_feedback():
+    if not FEEDBACK_FILE.exists():
+        return []
+    out = []
+    for line in FEEDBACK_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except Exception:
+            pass
+    return out
+
+
+def _write_feedback(items):
+    FEEDBACK_DIR.mkdir(parents=True, exist_ok=True)
+    body = "\n".join(json.dumps(x, ensure_ascii=False) for x in items)
+    FEEDBACK_FILE.write_text(body + ("\n" if items else ""), encoding="utf-8")
+
+
+@app.post("/api/feedback")
+async def api_feedback_create(req: Request):
+    """팀원이 사이트에서 남기는 개선 제안 (이름/화면/내용/선택 스크린샷)."""
+    body = await req.json()
+    author = (body.get("author") or "익명").strip()[:40] or "익명"
+    tab = (body.get("tab") or "").strip()[:40]
+    text = (body.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"error": "내용이 비어있습니다"}, status_code=400)
+    fid = str(int(time.time() * 1000))
+    has_shot = False
+    shot = body.get("screenshot")
+    if isinstance(shot, str) and shot.startswith("data:image"):
+        try:
+            SHOTS_DIR.mkdir(parents=True, exist_ok=True)
+            (SHOTS_DIR / f"{fid}.png").write_bytes(base64.b64decode(shot.split(",", 1)[1]))
+            has_shot = True
+        except Exception:
+            has_shot = False
+    item = {
+        "id": fid, "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "author": author, "tab": tab, "text": text[:4000],
+        "hasShot": has_shot, "status": "new",
+    }
+    items = _read_feedback()
+    items.append(item)
+    _write_feedback(items)
+    return {"ok": True, "id": fid}
+
+
+@app.get("/api/feedback")
+def api_feedback_list():
+    items = _read_feedback()
+    items.reverse()  # 최신 먼저
+    return JSONResponse({"items": items})
+
+
+@app.get("/api/feedback/shot/{fid}")
+def api_feedback_shot(fid: str):
+    p = SHOTS_DIR / f"{Path(fid).name}.png"  # 경로 조작 방지
+    if not p.exists():
+        return JSONResponse({"error": "스크린샷 없음"}, status_code=404)
+    return FileResponse(str(p), media_type="image/png")
+
+
+@app.post("/api/feedback/update")
+async def api_feedback_update(req: Request):
+    """제안 상태 변경 (검토 시 우리가 호출). status: new|reviewing|done."""
+    body = await req.json()
+    fid = str(body.get("id") or "")
+    status = body.get("status")
+    if status not in FEEDBACK_STATUS:
+        return JSONResponse({"error": "status 값 오류"}, status_code=400)
+    items = _read_feedback()
+    found = False
+    for it in items:
+        if str(it.get("id")) == fid:
+            it["status"] = status
+            found = True
+    if found:
+        _write_feedback(items)
+    return {"ok": found}
 
 
 # ============ 정적 데이터 (variables / examples) ============

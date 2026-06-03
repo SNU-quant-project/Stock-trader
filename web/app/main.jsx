@@ -147,6 +147,7 @@ function App() {
   const [panel, setPanel] = React.useState({ code: true, results: true });
   const [toastMsg, setToastMsg] = React.useState(null);
   const [liveModal, setLiveModal] = React.useState(false);
+  const [feedbackModal, setFeedbackModal] = React.useState(false);
   const seqRef = React.useRef(1);
   const progRefs = React.useRef({});
 
@@ -282,16 +283,18 @@ function App() {
 
   return (
     <div className="app" style={themeVars}>
-      <TopNav active={activeTab} onChange={setActiveTab} />
+      <TopNav active={activeTab} onChange={setActiveTab} onFeedback={() => setFeedbackModal(true)} />
       {activeTab === "backtest" && <BacktestWorkspace state={wsState} tweaks={t} />}
       {activeTab === "performance" && <PerformanceTab />}
       {activeTab === "orders" && <OrdersTab />}
       {activeTab === "positions" && <PositionsTab />}
       {activeTab === "botlogs" && <BotLogsTab />}
       {activeTab === "news" && <NewsTab />}
+      {activeTab === "feedback" && <FeedbackTab />}
 
       {toastMsg && <Toast msg={toastMsg} onClose={() => setToastMsg(null)} />}
       {liveModal && <LiveModal onCancel={() => setLiveModal(false)} onConfirm={() => { setLiveModal(false); runBot("live"); }} />}
+      {feedbackModal && <FeedbackModal currentTab={activeTab} onClose={() => setFeedbackModal(false)} onDone={(m) => toast(m)} />}
 
       <TweaksPanel>
         <TweakSection label="Brand / Accent" />
