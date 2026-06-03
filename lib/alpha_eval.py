@@ -72,7 +72,7 @@ def _build_pit_fundamentals(fundamentals, dates, symbols, fallback_lag=FALLBACK_
     return result
 
 
-def build_namespace(panel, fundamentals, sector_series, universe_mask=None):
+def build_namespace(panel, fundamentals, sector_series, universe_mask=None, subindustry_series=None):
     """eval 에 넘길 변수 namespace 만들기.
 
     universe_mask: (date × symbol) bool DataFrame (선택). 주어지면 비멤버 구간의
@@ -132,6 +132,11 @@ def build_namespace(panel, fundamentals, sector_series, universe_mask=None):
 
     # === Sector group (Series, index=symbol) ===
     sector_aligned = sector_series.reindex(symbols).fillna("Unknown")
+    # === Sub-Industry group (세분류). 없으면 sector 로 폴백 ===
+    if subindustry_series is not None:
+        subindustry_aligned = subindustry_series.reindex(symbols).fillna(sector_aligned)
+    else:
+        subindustry_aligned = sector_aligned
 
     # === returns (자주 쓰임) ===
     returns = close.pct_change()
@@ -146,8 +151,8 @@ def build_namespace(panel, fundamentals, sector_series, universe_mask=None):
         "returns": returns,
         # group
         "sector": sector_aligned,
-        "industry": sector_aligned,  # alias
-        "subindustry": sector_aligned,  # alias
+        "industry": sector_aligned,  # alias (GICS Industry 데이터 없음 → sector)
+        "subindustry": subindustry_aligned,  # 실제 GICS Sub-Industry (없으면 sector)
         # numpy/pandas (필요 시)
         "np": np,
         "pd": pd,
@@ -393,11 +398,11 @@ def _normalize_truncate(W, trunc):
 
 
 def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_full=False,
-             universe_mask=None):
+             universe_mask=None, subindustry_map=None):
     """expression 을 평가해서 weight 반환.
 
     settings:
-      - neutralization: "Sector" | "Cap Bucket" | "Sector + Cap Bucket" | "Market" | "None"
+      - neutralization: "Sector" | "Cap Bucket" | "Sector + Cap Bucket" | "Subindustry" | "Market" | "None"
       - decay: int (linear decay days, 0=skip)
       - truncation: float (0.0~0.20, 0=skip)
       - delay: 1 (기본; D-1 데이터로 D 진입)
@@ -405,13 +410,17 @@ def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_
     universe_mask: (date × symbol) bool DataFrame (선택, 백테스트용).
         비멤버 구간을 NaN 으로 가려 PIT 유니버스 재현. None 이면 패널 전체 사용
         (라이브 봇은 이미 현재 멤버만 패널에 담으므로 불필요).
+    subindustry_map: {symbol: GICS Sub-Industry} (선택). 주어지면 Subindustry 중립화와
+        식 내 `subindustry` 변수가 실제 세분류로 동작. 없으면 sector 로 폴백.
 
     return_full=False (기본): 마지막 거래일 Series 반환
     return_full=True: 전체 날짜 DataFrame 반환 (백테스팅용)
     """
     settings = settings or {}
     sector_series = pd.Series(sector_map, name="sector")
-    ns = build_namespace(panel, fundamentals, sector_series, universe_mask=universe_mask)
+    subindustry_series = pd.Series(subindustry_map, name="subindustry") if subindustry_map else sector_series
+    ns = build_namespace(panel, fundamentals, sector_series, universe_mask=universe_mask,
+                         subindustry_series=subindustry_series)
 
     # === 1. 식 평가 (multi-line 지원) ===
     raw = _evaluate_expression(expression, ns)
@@ -448,6 +457,9 @@ def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_
         cb = _cap_bucket()
         if cb is not None:
             raw = ops.group_neutralize(raw, cb)
+    elif neut == "Subindustry":
+        # GICS Sub-Industry(섹터보다 세분) 내 중립화. subindustry_map 없으면 sector 와 동일.
+        raw = ops.group_neutralize(raw, subindustry_series)
     elif neut == "Market":
         raw = raw.sub(raw.mean(axis=1), axis=0)
     # None → 그대로

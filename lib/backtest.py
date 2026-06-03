@@ -38,7 +38,13 @@ def load_backtest_data():
         sec = pd.read_csv(sec_path)
         # 완전 섹터맵을 우선 적용 (현재 멤버 + 방출 종목 모두 포함)
         sector_map.update(dict(zip(sec["Symbol"], sec["Sector"])))
-    return panel, fundamentals, sector_map
+    # Sub-Industry 맵: 현재 멤버는 CSV 의 GICS Sub-Industry, union 은 보강 파일(10_)
+    subindustry_map = dict(zip(current["Symbol"], current["GICS Sub-Industry"]))
+    sub_path = ROOT / "data" / "sp500_subindustries.csv"
+    if sub_path.exists():
+        sub = pd.read_csv(sub_path)
+        subindustry_map.update(dict(zip(sub["Symbol"], sub["SubIndustry"])))
+    return panel, fundamentals, sector_map, subindustry_map
 
 
 def run_backtest(weights, panel, delay=1):
@@ -134,10 +140,10 @@ def backtest_alpha(expression, settings):
     PIT 유니버스: 그날 S&P 500 멤버가 아니던 구간은 비중 0 으로 처리.
     (편입 전 = 미보유, 방출 후 = 청산)
     """
-    panel, fundamentals, sector_map = load_backtest_data()
+    panel, fundamentals, sector_map, subindustry_map = load_backtest_data()
     mask = _build_panel_membership_mask(panel)
     weights = evaluate(expression, panel, fundamentals, sector_map, settings,
-                       return_full=True, universe_mask=mask)
+                       return_full=True, universe_mask=mask, subindustry_map=subindustry_map)
     delay = int(settings.get("delay", 1))
     returns = run_backtest(weights, panel, delay=delay)
     metrics = compute_metrics(returns, weights)

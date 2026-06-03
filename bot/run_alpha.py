@@ -88,13 +88,14 @@ def load_config():
         return json.load(f)
 
 
-def compute_today_weights(panel, sector_map, expression, settings):
+def compute_today_weights(panel, sector_map, expression, settings, subindustry_map=None):
     """alpha expression 평가해서 마지막 거래일 포지션 비중 반환."""
     try:
         fundamentals = pd.read_parquet(ROOT / "data" / "sp500_fundamentals.parquet")
     except FileNotFoundError:
         fundamentals = pd.DataFrame()
-    return evaluate(expression, panel, fundamentals, sector_map, settings)
+    return evaluate(expression, panel, fundamentals, sector_map, settings,
+                    subindustry_map=subindustry_map)
 
 
 # === 4. 목표 포지션 ↔ 주문 ===
@@ -231,6 +232,12 @@ def main(dry_run=False):
         sector_map.update(dict(zip(sec["Symbol"], sec["Sector"])))
     for s in members:
         sector_map.setdefault(s, "Unknown")
+    # Sub-Industry 맵 (Subindustry 중립화용): 현재 멤버 GICS Sub-Industry + 보강 파일
+    subindustry_map = dict(zip(current_csv["Symbol"], current_csv["GICS Sub-Industry"]))
+    sub_path = ROOT / "data" / "sp500_subindustries.csv"
+    if sub_path.exists():
+        sub = pd.read_csv(sub_path)
+        subindustry_map.update(dict(zip(sub["Symbol"], sub["SubIndustry"])))
 
     cfg = load_config()
     expression = cfg["expression"]
@@ -238,7 +245,7 @@ def main(dry_run=False):
     print(f"  expression: {expression}")
     print(f"  settings:   {settings}")
 
-    weights = compute_today_weights(panel, sector_map, expression, settings)
+    weights = compute_today_weights(panel, sector_map, expression, settings, subindustry_map)
     longs = weights[weights > 0]
     shorts = weights[weights < 0]
     print(f"  종목 수: {len(weights)}  long: {len(longs)}  short: {len(shorts)}")
