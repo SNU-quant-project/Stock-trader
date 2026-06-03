@@ -751,6 +751,20 @@ async def api_post_alpha(req: Request):
     return {"ok": True, "id": item["id"]}
 
 
+@app.delete("/api/alphas/{aid}")
+def api_delete_alpha(aid: str):
+    """공유 알파 삭제 (id 로)."""
+    items = _read_alphas()
+    kept = [x for x in items if str(x.get("id")) != str(aid)]
+    if len(kept) == len(items):
+        return JSONResponse({"ok": False, "error": "해당 알파를 찾을 수 없습니다"}, status_code=404)
+    ALPHAS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ALPHAS_FILE.write_text(
+        ("\n".join(json.dumps(x, ensure_ascii=False) for x in kept) + "\n") if kept else "",
+        encoding="utf-8")
+    return {"ok": True}
+
+
 @app.get("/api/data")
 def api_data():
     out = {"variables": VARIABLES, "examples": EXAMPLES, "config": read_config()}

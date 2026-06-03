@@ -72,6 +72,15 @@ function AccountCards() {
 
 const DONUT_COLORS = ["#22a06b", "#2f7ce0", "#7c5cff", "#e0792f", "#16a36a", "#d94a6a", "#0fb5c4", "#9b8b3f", "#5b6577", "#c0c7d2"];
 
+// GICS 섹터 → 컬럼에 들어갈 짧은 라벨 (긴 이름이 표를 밀지 않게)
+const SECTOR_ABBR = {
+  "Information Technology": "Info Tech", "Communication Services": "Comm Svcs",
+  "Consumer Discretionary": "Cons Disc", "Consumer Staples": "Cons Staples",
+  "Health Care": "Health Care", "Financials": "Financials", "Industrials": "Industrials",
+  "Energy": "Energy", "Materials": "Materials", "Utilities": "Utilities",
+  "Real Estate": "Real Estate", "Unknown": "—",
+};
+
 function SideBlock({ rows, title, dotColor, valueKey, weightFromCost }) {
   const [showAll, setShowAll] = React.useState(false);
   const total = rows.reduce((s, r) => s + Math.abs(r[valueKey]), 0) || 1;
@@ -95,6 +104,7 @@ function SideBlock({ rows, title, dotColor, valueKey, weightFromCost }) {
           <tr style={{ color: "var(--tx-on-light-3)", fontSize: 11, textAlign: "left", borderBottom: "1px solid var(--res-line)" }}>
             <th style={{ padding: "7px 4px", fontWeight: 600 }}>Symbol</th>
             <th style={{ padding: "7px 4px", fontWeight: 600 }}>Company</th>
+            <th style={{ padding: "7px 4px", fontWeight: 600 }}>Sector</th>
             <th style={{ padding: "7px 4px", fontWeight: 600, textAlign: "right" }}>Value</th>
             {rows[0] && rows[0].pl !== undefined && <th style={{ padding: "7px 4px", fontWeight: 600, textAlign: "right" }}>P&amp;L</th>}
             <th style={{ padding: "7px 4px", fontWeight: 600, textAlign: "right" }}>Weight</th>
@@ -109,10 +119,11 @@ function SideBlock({ rows, title, dotColor, valueKey, weightFromCost }) {
                    onMouseEnter={(e) => { e.currentTarget.style.color = "var(--cool)"; e.currentTarget.style.textDecoration = "underline"; }}
                    onMouseLeave={(e) => { e.currentTarget.style.color = "var(--tx-on-light)"; e.currentTarget.style.textDecoration = "none"; }}>{r.sym}</a>
               </td>
-              <td style={{ padding: "8px 4px", maxWidth: 130, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <td style={{ padding: "8px 4px", maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <a href={`https://finance.yahoo.com/quote/${r.sym}/`} target="_blank" rel="noopener noreferrer"
                    style={{ color: "var(--cool)", textDecoration: "none" }} title={r.name}>{r.name}</a>
               </td>
+              <td style={{ padding: "8px 4px", maxWidth: 96, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--tx-on-light-2)", fontSize: 11.5 }} title={r.sector}>{SECTOR_ABBR[r.sector] || r.sector || "—"}</td>
               <td className="tabnum" style={{ padding: "8px 4px", textAlign: "right" }}>{fmtUSD0(Math.abs(r[valueKey]))}</td>
               {r.pl !== undefined && <td className="tabnum" style={{ padding: "8px 4px", textAlign: "right", color: r.pl >= 0 ? "var(--up)" : "var(--down)", fontWeight: 600 }}>{fmtUSD0(r.pl)} ({fmtPct(r.plpc, 1)})</td>}
               <td className="tabnum" style={{ padding: "8px 4px", textAlign: "right", color: dotColor, fontWeight: 600 }}>{fmtPctRaw(Math.abs(r[valueKey]) / total, 1)}</td>

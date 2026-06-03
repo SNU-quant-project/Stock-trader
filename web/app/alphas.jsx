@@ -86,13 +86,13 @@ function ShareAlphaModal({ onClose, onDone }) {
   );
 }
 
-function AlphaCard({ a, onUse }) {
+function AlphaCard({ a, onUse, onDelete }) {
   const s = a.settings || {};
   const chips = [["Neut", s.neutralization], ["Delay", s.delay], ["Decay", s.decay], ["Trunc", s.truncation]]
     .filter(([, v]) => v !== undefined && v !== null && v !== "");
   return (
     <Card style={{ marginBottom: 14 }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 10 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "var(--tx-on-light)" }}>{a.name}</div>
           <div style={{ fontSize: 12, color: "var(--tx-on-light-3)", marginTop: 2 }}>{a.author} · {a.ts}</div>
@@ -104,6 +104,14 @@ function AlphaCard({ a, onUse }) {
           onMouseEnter={(e) => e.currentTarget.style.background = "var(--accent-hi)"}
           onMouseLeave={(e) => e.currentTarget.style.background = "var(--accent)"}>
           <Icon name="flask" size={14} /> 백테스트에서 열기
+        </button>
+        <button onClick={() => onDelete(a)} title="삭제" style={{
+          width: 36, height: 36, display: "grid", placeItems: "center", borderRadius: 8, flexShrink: 0,
+          border: "1px solid var(--res-line)", background: "#fff", color: "var(--tx-on-light-3)",
+        }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = "var(--down)"; e.currentTarget.style.borderColor = "var(--down)"; e.currentTarget.style.background = "#fdeceb"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = "var(--tx-on-light-3)"; e.currentTarget.style.borderColor = "var(--res-line)"; e.currentTarget.style.background = "#fff"; }}>
+          <Icon name="trash" size={15} />
         </button>
       </div>
       <pre style={{ margin: 0, fontFamily: "var(--font-mono)", fontSize: 12.5, color: "var(--tx-on-light)", background: "var(--res-alt)", border: "1px solid var(--res-line)", borderRadius: 8, padding: "11px 13px", whiteSpace: "pre-wrap", lineHeight: 1.5, overflowX: "auto" }}>{a.expression}</pre>
@@ -127,6 +135,16 @@ function AlphasTab({ onUse, toast }) {
   }, []);
   React.useEffect(() => { load(); }, [load]);
 
+  const del = (a) => {
+    if (!window.confirm(`'${a.name}' 알파를 삭제할까요?`)) return;
+    fetch(`/api/alphas/${a.id}`, { method: "DELETE" }).then((r) => r.json())
+      .then((res) => {
+        if (res.ok) { if (toast) toast('🗑 <b>알파가 삭제되었습니다</b>'); load(); }
+        else if (toast) toast('⚠️ <b>삭제 실패</b> — ' + (res.error || ""));
+      })
+      .catch(() => { if (toast) toast('⚠️ <b>삭제 실패</b>'); });
+  };
+
   return (
     <Page title="Alphas" sub="팀원·유저가 만든 알파를 공유하고, 클릭 한 번으로 백테스트에서 검증해보세요."
       right={
@@ -146,7 +164,7 @@ function AlphasTab({ onUse, toast }) {
       ) : (
         <div>
           <div style={{ fontSize: 12.5, color: "var(--tx-on-light-3)", marginBottom: 12 }}>공유된 알파 {items.length}개</div>
-          {items.map((a) => <AlphaCard key={a.id} a={a} onUse={onUse} />)}
+          {items.map((a) => <AlphaCard key={a.id} a={a} onUse={onUse} onDelete={del} />)}
         </div>
       )}
 
