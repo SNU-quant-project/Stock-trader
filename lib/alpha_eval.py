@@ -103,6 +103,12 @@ def build_namespace(panel, fundamentals, sector_series, universe_mask=None):
     # === 가격에 따라 매일 변하는 derived fundamentals ===
     if "shares" in fund_broadcast:
         shares_df = fund_broadcast["shares"]
+        # 비정상적으로 작은 주식수는 무효 처리(NaN). 합병/개명 직후 종목은 EDGAR 에
+        # 초기 placeholder(예: 1000주)가 남아 nearest-asof 매칭이 이를 끌어오면
+        # cap 이 수천 달러로 찍혀 (x/cap) 류 알파를 통째로 오염시킨다(예: PSKY, DISH).
+        # 실제 S&P 500 최소 주식수도 수백만(NVR ~2.7M) → 10만주 미만은 데이터 오류로 간주.
+        shares_df = shares_df.where(shares_df >= 1e5)
+        fund_broadcast["shares"] = shares_df
         # cap = 실제 시총 = 주식수 × 실제(raw)가격. 분할보정 가격을 쓰면 분할 전 구간 시총이 어긋남.
         fund_broadcast["cap"] = shares_df * close_raw
         # pe/pb/ps 도 raw 가격 사용: EDGAR 주당지표(eps, bps)가 분할 전(as-reported)
