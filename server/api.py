@@ -548,19 +548,25 @@ async def api_feedback_create(req: Request):
     if not text:
         return JSONResponse({"error": "내용이 비어있습니다"}, status_code=400)
     fid = str(int(time.time() * 1000))
-    has_shot = False
-    shot = body.get("screenshot")
-    if isinstance(shot, str) and shot.startswith("data:image"):
-        try:
-            SHOTS_DIR.mkdir(parents=True, exist_ok=True)
-            (SHOTS_DIR / f"{fid}.png").write_bytes(base64.b64decode(shot.split(",", 1)[1]))
-            has_shot = True
-        except Exception:
-            has_shot = False
+    shots = body.get("screenshots")
+    if not isinstance(shots, list):
+        single = body.get("screenshot")          # 단일 첨부 하위호환
+        shots = [single] if single else []
+    shot_count = 0
+    if shots:
+        SHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        for s in shots[:8]:                       # 최대 8장
+            if isinstance(s, str) and s.startswith("data:image"):
+                try:
+                    (SHOTS_DIR / f"{fid}_{shot_count}.png").write_bytes(
+                        base64.b64decode(s.split(",", 1)[1]))
+                    shot_count += 1
+                except Exception:
+                    pass
     item = {
         "id": fid, "ts": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "author": author, "tab": tab, "text": text[:4000],
-        "hasShot": has_shot, "status": "new",
+        "shots": shot_count, "status": "new",
     }
     items = _read_feedback()
     items.append(item)
@@ -575,9 +581,9 @@ def api_feedback_list():
     return JSONResponse({"items": items})
 
 
-@app.get("/api/feedback/shot/{fid}")
-def api_feedback_shot(fid: str):
-    p = SHOTS_DIR / f"{Path(fid).name}.png"  # 경로 조작 방지
+@app.get("/api/feedback/shot/{fid}/{idx}")
+def api_feedback_shot(fid: str, idx: int):
+    p = SHOTS_DIR / f"{Path(fid).name}_{int(idx)}.png"  # 경로 조작 방지
     if not p.exists():
         return JSONResponse({"error": "스크린샷 없음"}, status_code=404)
     return FileResponse(str(p), media_type="image/png")

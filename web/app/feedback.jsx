@@ -22,18 +22,20 @@ function FeedbackModal({ currentTab, onClose, onDone }) {
   const [author, setAuthor] = React.useState("");
   const [screen, setScreen] = React.useState(curLabel);
   const [text, setText] = React.useState("");
-  const [shot, setShot] = React.useState(null);
-  const [shotName, setShotName] = React.useState("");
+  const [shots, setShots] = React.useState([]);   // [{ url, name }] — 여러 장
   const [busy, setBusy] = React.useState(false);
 
   const onFile = (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (!f) { setShot(null); setShotName(""); return; }
-    if (f.size > 4 * 1024 * 1024) { alert("이미지는 4MB 이하로 첨부해줘."); e.target.value = ""; return; }
-    const reader = new FileReader();
-    reader.onload = () => { setShot(reader.result); setShotName(f.name); };
-    reader.readAsDataURL(f);
+    const files = Array.from(e.target.files || []);
+    files.forEach((f) => {
+      if (f.size > 4 * 1024 * 1024) { alert(f.name + " — 이미지는 4MB 이하로 첨부해줘."); return; }
+      const reader = new FileReader();
+      reader.onload = () => setShots((s) => (s.length >= 8 ? s : [...s, { url: reader.result, name: f.name }]));
+      reader.readAsDataURL(f);
+    });
+    e.target.value = "";   // 같은 파일도 다시 선택 가능
   };
+  const removeShot = (i) => setShots((s) => s.filter((_, idx) => idx !== i));
 
   const submit = async () => {
     if (!text.trim()) { alert("개선 내용을 입력해줘."); return; }
@@ -41,7 +43,7 @@ function FeedbackModal({ currentTab, onClose, onDone }) {
     try {
       const r = await fetch("/api/feedback", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ author: author.trim(), tab: screen, text: text.trim(), screenshot: shot }),
+        body: JSON.stringify({ author: author.trim(), tab: screen, text: text.trim(), screenshots: shots.map((s) => s.url) }),
       });
       const res = await r.json();
       if (res.ok) { onDone && onDone('💡 <b>제안 접수 완료</b> — 고마워! "제안" 탭에서 처리 상태를 볼 수 있어.'); onClose(); }
@@ -81,15 +83,24 @@ function FeedbackModal({ currentTab, onClose, onDone }) {
               style={{ ...field, resize: "vertical", lineHeight: 1.5 }} />
           </div>
           <div>
-            <label style={lbl}>스크린샷 (선택)</label>
+            <label style={lbl}>스크린샷 (선택 · 여러 장 가능)</label>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <label style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--res-line)", background: "var(--res-alt)", fontSize: 12.5, fontWeight: 600, color: "var(--tx-on-light-2)", cursor: "pointer" }}>
+              <label style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--res-line)", background: "var(--res-alt)", fontSize: 12.5, fontWeight: 600, color: "var(--tx-on-light-2)", cursor: shots.length >= 8 ? "default" : "pointer", opacity: shots.length >= 8 ? 0.5 : 1 }}>
                 파일 선택
-                <input type="file" accept="image/*" onChange={onFile} style={{ display: "none" }} />
+                <input type="file" accept="image/*" multiple disabled={shots.length >= 8} onChange={onFile} style={{ display: "none" }} />
               </label>
-              <span style={{ fontSize: 12, color: "var(--tx-on-light-3)" }}>{shotName || "캡처 이미지를 붙이면 더 정확히 반영돼"}</span>
+              <span style={{ fontSize: 12, color: "var(--tx-on-light-3)" }}>{shots.length ? `${shots.length}장 첨부됨${shots.length >= 8 ? " (최대)" : ""}` : "캡처 이미지를 붙이면 더 정확히 반영돼 (여러 장 OK)"}</span>
             </div>
-            {shot && <img src={shot} alt="preview" style={{ marginTop: 10, maxWidth: "100%", maxHeight: 160, borderRadius: 8, border: "1px solid var(--res-line)" }} />}
+            {shots.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 10 }}>
+                {shots.map((s, i) => (
+                  <div key={i} style={{ position: "relative" }}>
+                    <img src={s.url} alt="preview" style={{ width: 96, height: 66, objectFit: "cover", borderRadius: 6, border: "1px solid var(--res-line)" }} />
+                    <button onClick={() => removeShot(i)} title="제거" style={{ position: "absolute", top: -7, right: -7, width: 18, height: 18, borderRadius: "50%", background: "var(--down)", color: "#fff", fontSize: 12, lineHeight: 1, display: "grid", placeItems: "center", border: "1.5px solid #fff", cursor: "pointer" }}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, padding: "0 24px 20px" }}>
@@ -153,9 +164,13 @@ function FeedbackTab() {
                 {badge(it.status)}
               </div>
               <div style={{ fontSize: 13.5, color: "var(--tx-on-light)", lineHeight: 1.55, whiteSpace: "pre-wrap" }}>{it.text}</div>
-              {it.hasShot && (
-                <img src={`/api/feedback/shot/${it.id}`} alt="screenshot" onClick={() => setLightbox(`/api/feedback/shot/${it.id}`)}
-                  style={{ marginTop: 11, maxHeight: 150, maxWidth: "100%", borderRadius: 8, border: "1px solid var(--res-line)", cursor: "zoom-in" }} />
+              {it.shots > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 11 }}>
+                  {Array.from({ length: it.shots }).map((_, i) => (
+                    <img key={i} src={`/api/feedback/shot/${it.id}/${i}`} alt="screenshot" onClick={() => setLightbox(`/api/feedback/shot/${it.id}/${i}`)}
+                      style={{ maxHeight: 130, maxWidth: 200, borderRadius: 8, border: "1px solid var(--res-line)", cursor: "zoom-in" }} />
+                  ))}
+                </div>
               )}
             </Card>
           ))}
