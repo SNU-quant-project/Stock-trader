@@ -217,6 +217,38 @@ def _evaluate_expression(expression, ns):
         raise ValueError("마지막 줄에서 결과 추출 실패 — `alpha = ...` 으로 끝내거나 마지막 줄을 표현식으로")
 
 
+def _normalize_truncate(W, trunc):
+    """행(날짜)별로 |w|합=1 정규화 후, 종목당 최대비중 trunc 캡을 적용.
+
+    BRAIN truncation 과 동일: 단순 clip 1회로는 이후 재정규화에서 캡이 풀리므로,
+    초과분을 캡으로 고정하고 남은 비중을 나머지 종목에 비례 재분배하는 과정을
+    수렴할 때까지 반복한다. → 모든 |w| <= trunc 를 보장하면서 |w|합=1 유지.
+    trunc 가 0/None 이면 정규화만.
+    """
+    s = W.abs().sum(axis=1).replace(0, np.nan)
+    W = W.div(s, axis=0)
+    if not trunc or trunc <= 0:
+        return W
+
+    maxw = float(trunc)
+    A = W.to_numpy(dtype=float)               # NaN = 비유니버스(미보유)
+    nanmask = np.isnan(A)
+    A = np.where(nanmask, 0.0, A)
+    for _ in range(100):
+        over = np.abs(A) > maxw + 1e-12
+        if not over.any():
+            break
+        capped = np.where(over, np.sign(A) * maxw, A)
+        capped_mass = (over * maxw).sum(axis=1)                       # 캡에 고정된 질량
+        free_mass = np.where(over, 0.0, np.abs(A)).sum(axis=1)        # 재분배 대상 질량
+        target = np.clip(1.0 - capped_mass, 0.0, None)
+        scale = np.divide(target, free_mass,
+                          out=np.zeros_like(target), where=free_mass > 1e-12)
+        A = np.where(over, capped, capped * scale[:, None])
+    A[nanmask] = np.nan
+    return pd.DataFrame(A, index=W.index, columns=W.columns)
+
+
 def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_full=False,
              universe_mask=None):
     """expression 을 평가해서 weight 반환.
@@ -268,28 +300,20 @@ def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_
         raw = raw.sub(raw.mean(axis=1), axis=0)
     # None → 그대로
 
-    # === 3. Truncation (종목당 max 비중 캡) ===
-    trunc = settings.get("truncation", 0)
-    if trunc and trunc > 0:
-        # 정규화 후 8% 캡, 한 번만 (Brain 방식)
-        abs_sum = raw.abs().sum(axis=1).replace(0, np.nan)
-        norm = raw.div(abs_sum, axis=0)
-        norm = norm.clip(lower=-trunc, upper=trunc)
-        raw = norm
-
-    # === 4. Decay (linear) ===
+    # === 3. Decay (linear) — truncation 전에 적용 (BRAIN 순서) ===
     decay_d = settings.get("decay", 0)
     if decay_d and decay_d > 1:
         raw = ops.ts_decay_linear(raw, decay_d)
 
-    # === 5. Delay ===
+    # === 4. Delay ===
     # raw[t] 는 t 일자 close 까지 본 알파.
     # 라이브 봇: 마지막 행이 어제(D-1)자 알파 → 오늘(D) 시가 진입. shift 불필요.
     # 백테스트: backtest 함수에서 weights.shift(delay) 처리해 lookahead 회피.
 
-    # === 6. Normalize |sum|=1 (각 날짜) ===
-    abs_sum = raw.abs().sum(axis=1).replace(0, np.nan)
-    full = raw.div(abs_sum, axis=0)
+    # === 5. Normalize |w|=1 + Truncation (마지막 단계, 종목당 캡 엄수) ===
+    # 정규화와 캡을 한 번에 처리해 이후 단계에서 캡이 풀리지 않도록 함.
+    trunc = settings.get("truncation", 0)
+    full = _normalize_truncate(raw, trunc)
 
     if return_full:
         return full.dropna(how="all")
