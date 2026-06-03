@@ -514,7 +514,7 @@ def read_config():
 
 # ============ 개선 제안 (팀원 피드백) ============
 
-FEEDBACK_STATUS = ("new", "reviewing", "done")  # 접수 / 검토중 / 반영됨
+FEEDBACK_STATUS = ("new", "done")  # 접수 / 완료(반영 또는 기각)
 
 
 def _read_feedback():
@@ -591,17 +591,22 @@ def api_feedback_shot(fid: str, idx: int):
 
 @app.post("/api/feedback/update")
 async def api_feedback_update(req: Request):
-    """제안 상태 변경 (검토 시 우리가 호출). status: new|reviewing|done."""
+    """제안 상태/처리 코멘트 변경 (검토 시 우리가 호출).
+    status: new|done (선택), comment: 처리 내용/기각 사유 (선택)."""
     body = await req.json()
     fid = str(body.get("id") or "")
     status = body.get("status")
-    if status not in FEEDBACK_STATUS:
+    if status is not None and status not in FEEDBACK_STATUS:
         return JSONResponse({"error": "status 값 오류"}, status_code=400)
+    comment = body.get("comment")
     items = _read_feedback()
     found = False
     for it in items:
         if str(it.get("id")) == fid:
-            it["status"] = status
+            if status is not None:
+                it["status"] = status
+            if comment is not None:
+                it["comment"] = str(comment).strip()[:1000]
             found = True
     if found:
         _write_feedback(items)

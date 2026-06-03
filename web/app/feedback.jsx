@@ -1,9 +1,8 @@
 /* ===== 개선 제안 (팀원 피드백) — 제출 모달 + 제안 목록 탭 ===== */
 
 const FB_STATUS = {
-  new:       { label: "🆕 접수",   bg: "var(--res-rail)",    color: "var(--tx-on-light-2)" },
-  reviewing: { label: "👀 검토중", bg: "var(--cool-soft)",   color: "var(--cool)" },
-  done:      { label: "✅ 반영됨", bg: "var(--accent-soft)", color: "var(--accent-lo)" },
+  new:  { label: "🆕 접수", bg: "var(--res-rail)",    color: "var(--tx-on-light-2)" },
+  done: { label: "✅ 완료", bg: "var(--accent-soft)", color: "var(--accent-lo)" },
 };
 
 function _screenOptions() {
@@ -138,7 +137,7 @@ function FeedbackTab() {
 
       {items && items.length > 0 && (
         <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-          {[["new", "접수"], ["reviewing", "검토중"], ["done", "반영됨"]].map(([k, l]) => (
+          {[["new", "접수"], ["done", "완료"]].map(([k, l]) => (
             <div key={k} style={{ display: "flex", alignItems: "center", gap: 7, padding: "6px 13px", borderRadius: 20, background: FB_STATUS[k].bg, color: FB_STATUS[k].color, fontSize: 12.5, fontWeight: 700 }}>
               {l} <span className="tabnum">{counts[k] || 0}</span>
             </div>
@@ -170,6 +169,12 @@ function FeedbackTab() {
                     <img key={i} src={`/api/feedback/shot/${it.id}/${i}`} alt="screenshot" onClick={() => setLightbox(`/api/feedback/shot/${it.id}/${i}`)}
                       style={{ maxHeight: 130, maxWidth: 200, borderRadius: 8, border: "1px solid var(--res-line)", cursor: "zoom-in" }} />
                   ))}
+                </div>
+              )}
+              {it.comment && (
+                <div style={{ marginTop: 11, padding: "9px 12px", background: "var(--accent-soft)", border: "1px solid var(--accent-line)", borderRadius: 8, fontSize: 12.5, color: "var(--tx-on-light)", lineHeight: 1.5 }}>
+                  <span style={{ fontWeight: 700, color: "var(--accent-lo)" }}>📝 처리 내용</span>
+                  <span style={{ whiteSpace: "pre-wrap" }}> — {it.comment}</span>
                 </div>
               )}
             </Card>
