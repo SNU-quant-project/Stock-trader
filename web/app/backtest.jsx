@@ -93,11 +93,120 @@ function ExamplePicker({ onPick }) {
   );
 }
 
+// ---- 함수 · 데이터 레퍼런스 모달 ----
+function ReferenceModal({ onClose, onInsert }) {
+  const [q, setQ] = React.useState("");
+  const ref = (window.AB_DATA && window.AB_DATA.reference) || { fields: [], operators: [] };
+  const lq = q.trim().toLowerCase();
+  const hit = (...parts) => !lq || parts.some((p) => (p || "").toLowerCase().includes(lq));
+
+  const Row = ({ token, sig, desc, isFn, color }) => {
+    const insertable = /^[a-z_]+$/.test(token);
+    return (
+      <button
+        onClick={insertable ? () => onInsert(token, isFn) : undefined}
+        title={insertable ? "클릭하면 수식에 추가" : "참고용 문법"}
+        style={{
+          display: "block", width: "100%", textAlign: "left", padding: "8px 10px",
+          borderRadius: 6, cursor: insertable ? "pointer" : "default",
+          borderBottom: "1px solid rgba(255,255,255,0.04)",
+        }}
+        onMouseEnter={(e) => { if (insertable) e.currentTarget.style.background = "rgba(255,255,255,0.06)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}>
+        <div style={{ fontFamily: "var(--font-mono)", fontSize: 12.5, color, marginBottom: 2 }}>{sig}</div>
+        <div style={{ fontSize: 11.5, color: "var(--tx-on-dark-2)" }}>{desc}</div>
+      </button>
+    );
+  };
+
+  const Col = ({ title, count, accent, children }) => (
+    <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ fontSize: 11, letterSpacing: 1, fontWeight: 700, color: accent, padding: "0 4px 10px" }}>
+        {title} <span style={{ color: "var(--tx-on-dark-3)", fontWeight: 500 }}>· {count}</span>
+      </div>
+      <div className="editor-scroll" style={{ overflowY: "auto", paddingRight: 6, flex: 1 }}>{children}</div>
+    </div>
+  );
+
+  const GroupLabel = ({ children }) => (
+    <div style={{ fontSize: 10.5, fontWeight: 600, color: "var(--tx-on-dark-3)", margin: "12px 4px 4px" }}>{children}</div>
+  );
+
+  const fieldGroups = ref.fields
+    .map((g) => ({ group: g.group, items: g.items.filter(([n, d]) => hit(n, d)) }))
+    .filter((g) => g.items.length);
+  const fieldCount = fieldGroups.reduce((s, g) => s + g.items.length, 0);
+  const opGroups = ref.operators
+    .map((g) => ({ group: g.group, items: g.items.filter(([n, sig, d]) => hit(n, sig, d)) }))
+    .filter((g) => g.items.length);
+  const opCount = opGroups.reduce((s, g) => s + g.items.length, 0);
+
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, zIndex: 200, background: "rgba(6,9,15,0.72)",
+      display: "flex", alignItems: "center", justifyContent: "center", padding: 24,
+    }}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        width: "min(940px, 96vw)", height: "min(80vh, 760px)", display: "flex", flexDirection: "column",
+        background: "var(--panel-bg, #11151f)", border: "1px solid var(--panel-border, #2a3145)",
+        borderRadius: 12, boxShadow: "0 30px 80px rgba(0,0,0,0.6)", overflow: "hidden",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "16px 18px", borderBottom: "1px solid var(--panel-border, #2a3145)" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--tx-on-dark)", whiteSpace: "nowrap" }}>📖 함수 · 데이터</div>
+          <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색 (예: ts_, rank, 매출, returns)…"
+            style={{
+              flex: 1, height: 36, padding: "0 12px", background: "var(--panel-input, #0f1320)",
+              border: "1px solid var(--panel-border, #2a3145)", borderRadius: 8, color: "var(--tx-on-dark)",
+              fontSize: 13, outline: "none",
+            }} />
+          <button onClick={onClose} style={{ width: 32, height: 32, display: "grid", placeItems: "center", borderRadius: 8, color: "var(--tx-on-dark-2)", flexShrink: 0 }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "rgba(255,255,255,0.08)"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+            <Icon name="close" size={15} />
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 18, padding: "16px 18px", flex: 1, minHeight: 0 }}>
+          <Col title="데이터 필드" count={fieldCount} accent="var(--syn-var, #4ec9b0)">
+            {fieldGroups.length === 0 && <div style={{ color: "var(--tx-on-dark-3)", fontSize: 12, padding: 8 }}>일치 항목 없음</div>}
+            {fieldGroups.map((g) => (
+              <div key={g.group}>
+                <GroupLabel>{g.group}</GroupLabel>
+                {g.items.map(([n, d]) => <Row key={n} token={n} sig={n} desc={d} isFn={false} color="var(--syn-var, #4ec9b0)" />)}
+              </div>
+            ))}
+          </Col>
+          <div style={{ width: 1, background: "var(--panel-border, #2a3145)", flexShrink: 0 }} />
+          <Col title="연산자" count={opCount} accent="var(--syn-fn, #dcdcaa)">
+            {opGroups.length === 0 && <div style={{ color: "var(--tx-on-dark-3)", fontSize: 12, padding: 8 }}>일치 항목 없음</div>}
+            {opGroups.map((g) => (
+              <div key={g.group}>
+                <GroupLabel>{g.group}</GroupLabel>
+                {g.items.map(([n, sig, d]) => <Row key={n} token={n} sig={sig} desc={d} isFn={true} color="var(--syn-fn, #dcdcaa)" />)}
+              </div>
+            ))}
+          </Col>
+        </div>
+        <div style={{ padding: "10px 18px", borderTop: "1px solid var(--panel-border, #2a3145)", fontSize: 11.5, color: "var(--tx-on-dark-3)" }}>
+          항목을 클릭하면 수식에 추가됩니다 · 고정: USA · S&amp;P 500 · 일봉(D1)
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---- left editor pane ----
 function EditorPane({ expr, setExpr, settings, setSettings, showSettings, setShowSettings, simState, onSimulate, tweaks }) {
   const s = settings;
   const breadcrumb = `${s.region}/D${s.delay}/${s.universe.replace(/\s/g, "")}`;
   const canSim = simState !== "running" && expr.trim().length > 0;
+  const [showRef, setShowRef] = React.useState(false);
+  const insertToken = (name, isFn) => {
+    // setExpr 는 값만 받음(함수형 미지원) → 현재 expr 로 직접 계산
+    const ins = isFn ? name + "()" : name;
+    const sep = !expr || /[\s(,+\-*/]$/.test(expr) ? "" : " ";
+    setExpr((expr || "") + sep + ins);
+    setShowRef(false);
+  };
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", width: "100%", background: "var(--editor-bg)", minWidth: 0 }}>
       {/* sub bar */}
@@ -118,9 +227,22 @@ function EditorPane({ expr, setExpr, settings, setSettings, showSettings, setSho
         {showSettings && <SettingsPanel settings={settings} setSettings={setSettings} onClose={() => setShowSettings(false)} onApply={() => setShowSettings(false)} />}
       </div>
 
+      {showRef && <ReferenceModal onClose={() => setShowRef(false)} onInsert={insertToken} />}
+
       {/* action bar */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: 16, background: "var(--editor-bg)", borderTop: "1px solid var(--editor-line)", flexShrink: 0 }}>
-        <ExamplePicker onPick={setExpr} />
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <ExamplePicker onPick={setExpr} />
+          <button onClick={() => setShowRef(true)} title="사용 가능한 함수 · 데이터 목록" style={{
+            display: "flex", alignItems: "center", gap: 8, height: 42, padding: "0 18px",
+            background: "transparent", color: "var(--tx-on-dark-2)", borderRadius: "var(--r-sm)",
+            fontSize: 13.5, fontWeight: 600, border: "1px solid #2a3145",
+          }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.05)"; e.currentTarget.style.color = "var(--tx-on-dark)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--tx-on-dark-2)"; }}>
+            📖 함수·데이터
+          </button>
+        </div>
         <button onClick={onSimulate} disabled={!canSim} style={{
           display: "flex", alignItems: "center", gap: 9, height: 46, padding: "0 40px", borderRadius: "var(--r-sm)",
           fontSize: 15, fontWeight: 700, letterSpacing: 0.3,
@@ -140,4 +262,4 @@ function Spinner({ size = 15, color = "#fff" }) {
   return <span style={{ width: size, height: size, border: `2px solid ${color}`, borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />;
 }
 
-Object.assign(window, { SettingsPanel, EditorPane, ExamplePicker, NumInput, Spinner });
+Object.assign(window, { SettingsPanel, EditorPane, ExamplePicker, ReferenceModal, NumInput, Spinner });

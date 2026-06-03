@@ -1,8 +1,8 @@
 /* ===== Backtest workspace: sim tab bar + code editor + settings panel ===== */
 
 // ---- syntax highlight ----
-const FUNCS = new Set(["rank","winsorize","zscore","normalize","scale","quantile","ts_mean","ts_sum","ts_std_dev","ts_zscore","ts_rank","ts_delta","ts_delay","ts_backfill","ts_min","ts_max","ts_decay_linear","ts_corr","group_neutralize","group_rank","group_zscore","group_mean","bucket","trade_when","log","sqrt","abs","sign","signed_power","power","max","min","add","subtract","multiply","divide"]);
-const VARS = new Set(["returns","close","open","high","low","volume","cap","revenue","ni","fcf","ocf","roe","roa","pe","pb","ps","sector","industry","ppent","cash","debt","assets","equity","eps","beta","ev","shares"]);
+const FUNCS = new Set(["rank","winsorize","zscore","normalize","scale","quantile","scale_down","ts_mean","ts_sum","ts_std_dev","ts_zscore","ts_rank","ts_delta","ts_delay","ts_backfill","ts_min","ts_max","ts_av_diff","ts_product","ts_decay_linear","ts_scale","ts_arg_max","ts_arg_min","ts_count_nans","ts_corr","ts_covariance","hump","group_neutralize","group_rank","group_zscore","group_mean","group_min","group_max","group_scale","bucket","trade_when","densify","log","sqrt","abs","sign","signed_power","power","inverse","reverse","max","min","add","subtract","multiply","divide","to_nan","is_nan","if_else"]);
+const VARS = new Set(["returns","close","open","high","low","volume","cap","pe","pb","ps","book_value","roe","roa","cash","debt","assets","ppent","equity","inventory","shares","retained_earnings","current_assets","current_liabilities","revenue","ni","gross_profit","op_income","ebit","ebitda","eps","cost_of_revenue","fcf","capex","div_paid","sector","industry","subindustry"]);
 
 function highlight(code) {
   const out = [];
@@ -157,8 +157,12 @@ function CodeEditor({ expr, setExpr, tweaks }) {
     const tokenMatch = before.match(/[A-Za-z_]\w*$/);
     if (!tokenMatch) { setAc(null); return; }
     const token = tokenMatch[0];
-    const pool = window.AB_DATA.variables;
-    const items = pool.filter((v) => v.name.toLowerCase().includes(token.toLowerCase())).slice(0, 9);
+    const pool = window.AB_DATA.acItems || window.AB_DATA.variables;
+    const lt = token.toLowerCase();
+    // 토큰으로 시작하는 항목 우선, 그 다음 부분일치
+    const items = pool.filter((v) => v.name.toLowerCase().includes(lt))
+      .sort((a, b) => (b.name.toLowerCase().startsWith(lt) - a.name.toLowerCase().startsWith(lt)))
+      .slice(0, 9);
     if (!items.length) { setAc(null); return; }
     const lineIdx = before.split("\n").length - 1;
     const col = before.length - before.lastIndexOf("\n") - 1;
@@ -172,10 +176,12 @@ function CodeEditor({ expr, setExpr, tweaks }) {
     const caret = el.selectionStart;
     const before = expr.slice(0, caret).replace(/[A-Za-z_]\w*$/, "");
     const after = expr.slice(caret);
-    const next = before + item.name + after;
+    // 함수형 연산자는 여는 괄호까지 넣고 그 안에 커서를 둔다
+    const ins = item.fn ? item.name + "(" : item.name;
+    const next = before + ins + after;
     setExpr(next);
     setAc(null);
-    requestAnimationFrame(() => { el.focus(); const p = (before + item.name).length; el.setSelectionRange(p, p); });
+    requestAnimationFrame(() => { el.focus(); const p = (before + ins).length; el.setSelectionRange(p, p); });
   }
 
   function onKey(e) {
@@ -235,9 +241,9 @@ function CodeEditor({ expr, setExpr, tweaks }) {
                 ))}
               </div>
               {sel && (
-                <div style={{ background: "#0b0e16", border: "1px solid #2a3145", borderLeft: "none", padding: "12px 14px", minWidth: 200, maxWidth: 230 }}>
-                  <div style={{ color: "#fff", fontFamily: "var(--font-mono)", fontSize: 13, marginBottom: 8 }}>{sel.name}</div>
-                  <div style={{ color: "var(--tx-on-dark-2)", fontSize: 12, marginBottom: 6 }}><b style={{ color: "var(--tx-on-dark)" }}>Type</b>: {sel.type}</div>
+                <div style={{ background: "#0b0e16", border: "1px solid #2a3145", borderLeft: "none", padding: "12px 14px", minWidth: 210, maxWidth: 250 }}>
+                  <div style={{ color: sel.fn ? "var(--syn-fn)" : "var(--syn-var)", fontFamily: "var(--font-mono)", fontSize: 13, marginBottom: 8 }}>{sel.sig || sel.name}</div>
+                  <div style={{ color: "var(--tx-on-dark-2)", fontSize: 11.5, marginBottom: 6 }}><b style={{ color: "var(--tx-on-dark)" }}>{sel.fn ? "함수" : "데이터"}</b> · {sel.type}</div>
                   <div style={{ color: "var(--tx-on-dark-2)", fontSize: 12 }}>{sel.desc}</div>
                 </div>
               )}

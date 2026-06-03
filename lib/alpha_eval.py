@@ -161,6 +161,128 @@ def build_namespace(panel, fundamentals, sector_series, universe_mask=None):
     return ns
 
 
+def _convert_ternary(code):
+    """C 스타일 삼항 `cond ? a : b` 를 `if_else(cond, a, b)` 로 변환 (BRAIN 호환).
+
+    Python ast 는 `?:` 를 못 읽으므로 파싱 전에 치환한다. 문자열 리터럴과
+    괄호 깊이, 줄바꿈(문장 경계)을 인식해 중첩 / 함수인자 내부 삼항도 처리.
+    매칭되는 ':' 가 없으면 그대로 두어 이후 ast 가 SyntaxError 를 내게 한다.
+
+    예: ts_sum(returns > 0 ? 1 : 0, 250)
+        → ts_sum(if_else(returns > 0, 1, 0), 250)
+    """
+    if "?" not in code:
+        return code
+
+    OPEN, CLOSE = "([{", ")]}"
+    for _ in range(100):  # 중첩 / 연쇄 안전 상한
+        # 1) 문자열 밖 첫 '?' 와 그 괄호 깊이 찾기
+        q, dq = -1, 0
+        depth, quote = 0, None
+        for i, ch in enumerate(code):
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "'\"":
+                quote = ch
+            elif ch in OPEN:
+                depth += 1
+            elif ch in CLOSE:
+                depth -= 1
+            elif ch == "?":
+                q, dq = i, depth
+                break
+        if q < 0:
+            break
+
+        # 2) 매칭 ':' (앞으로, 같은 깊이, 중첩 삼항/줄/괄호 인식)
+        colon, pend = -1, 0
+        depth, quote = dq, None
+        i = q + 1
+        while i < len(code):
+            ch = code[i]
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "'\"":
+                quote = ch
+            elif ch in OPEN:
+                depth += 1
+            elif ch in CLOSE:
+                if depth == dq:
+                    break
+                depth -= 1
+            elif depth == dq:
+                if ch == "\n":
+                    break
+                elif ch == "?":
+                    pend += 1
+                elif ch == ":":
+                    if pend == 0:
+                        colon = i
+                        break
+                    pend -= 1
+            i += 1
+        if colon < 0:
+            break  # 변환 불가 → ast 가 에러를 내게 둠
+
+        # 3) cond 시작 위치 (뒤로, 같은 깊이; 경계: 여는괄호/콤마/줄/상위 삼항기호)
+        cstart = 0
+        depth = dq
+        i = q - 1
+        while i >= 0:
+            ch = code[i]
+            if ch in CLOSE:
+                depth += 1
+            elif ch in OPEN:
+                if depth == dq:
+                    cstart = i + 1
+                    break
+                depth -= 1
+            elif depth == dq and ch in ",\n?:":
+                cstart = i + 1
+                break
+            i -= 1
+
+        # 4) b 끝 위치 (앞으로, 같은 깊이; 경계: 닫는괄호/콤마/줄/상위 ':')
+        bend = len(code)
+        pend = 0
+        depth, quote = dq, None
+        i = colon + 1
+        while i < len(code):
+            ch = code[i]
+            if quote:
+                if ch == quote:
+                    quote = None
+            elif ch in "'\"":
+                quote = ch
+            elif ch in OPEN:
+                depth += 1
+            elif ch in CLOSE:
+                if depth == dq:
+                    bend = i
+                    break
+                depth -= 1
+            elif depth == dq:
+                if ch in ",\n":
+                    bend = i
+                    break
+                elif ch == "?":
+                    pend += 1
+                elif ch == ":":
+                    if pend == 0:
+                        bend = i
+                        break
+                    pend -= 1
+            i += 1
+
+        cond = code[cstart:q].strip()
+        a = code[q + 1:colon].strip()
+        b = code[colon + 1:bend].strip()
+        code = code[:cstart] + "if_else(" + cond + ", " + a + ", " + b + ")" + code[bend:]
+    return code
+
+
 def _evaluate_expression(expression, ns):
     """Brain 스타일 multi-line expression 평가.
 
@@ -170,6 +292,7 @@ def _evaluate_expression(expression, ns):
           x = rank(-returns);
           alpha = winsorize(x, std=3);
       - ';' 또는 newline 으로 줄 구분, '#' 주석
+      - C 스타일 삼항 `cond ? a : b` (BRAIN 호환, 내부적으로 if_else 로 변환)
 
     마지막 statement 가:
       - 표현식이면 그 값을 반환
@@ -193,6 +316,9 @@ def _evaluate_expression(expression, ns):
 
     if not code.strip():
         raise ValueError("빈 expression")
+
+    # C 스타일 삼항(`a ? b : c`) → if_else(a, b, c) (BRAIN 문법 호환)
+    code = _convert_ternary(code)
 
     tree = ast.parse(code, mode="exec")
     if not tree.body:
@@ -286,6 +412,15 @@ def evaluate(expression, panel, fundamentals, sector_map, settings=None, return_
 
     if not isinstance(raw, pd.DataFrame):
         raise ValueError(f"식 결과가 DataFrame 이 아님: {type(raw).__name__}")
+
+    # === 1.5 point-in-time 유니버스 재적용 ===
+    # 비교(>, <)·if_else·ts_backfill·to_nan 등 일부 연산자는 NaN(비멤버 구간)을
+    # 유한값으로 바꿔 방출/미편입 종목을 알파에 되살릴 수 있다. 최종 알파를 다시
+    # 멤버 구간으로 마스킹해 PIT 유니버스를 엄수한다. NaN 이 자연 전파되는 식
+    # (rank(-returns) 등)에는 영향 없음.
+    if universe_mask is not None:
+        m = universe_mask.reindex(index=raw.index, columns=raw.columns, fill_value=False)
+        raw = raw.where(m)
 
     # === 2. Neutralization ===
     neut = settings.get("neutralization", "Sector")

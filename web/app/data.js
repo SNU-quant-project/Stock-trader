@@ -180,24 +180,98 @@
     "소비 견조 확인, 임의소비재 우호적 ($AMZN, $HD)",
   ];
 
-  // ---- autocomplete variables (Brain-style) ----
-  const variables = [
-    { name: "returns", type: "Matrix, Price Volume", desc: "Daily returns" },
-    { name: "close", type: "Matrix, Price Volume", desc: "Daily close price" },
-    { name: "open", type: "Matrix, Price Volume", desc: "Daily open price" },
-    { name: "high", type: "Matrix, Price Volume", desc: "Daily high price" },
-    { name: "low", type: "Matrix, Price Volume", desc: "Daily low price" },
-    { name: "volume", type: "Matrix, Price Volume", desc: "Daily volume" },
-    { name: "cap", type: "Matrix, Fundamental", desc: "Market capitalization" },
-    { name: "revenue", type: "Matrix, Fundamental", desc: "Total revenue (TTM)" },
-    { name: "ni", type: "Matrix, Fundamental", desc: "Net income" },
-    { name: "fcf", type: "Matrix, Fundamental", desc: "Free cash flow" },
-    { name: "roe", type: "Matrix, Fundamental", desc: "Return on equity" },
-    { name: "pe", type: "Matrix, Fundamental", desc: "Price / Earnings" },
-    { name: "pb", type: "Matrix, Fundamental", desc: "Price / Book" },
-    { name: "sector", type: "Group, GICS", desc: "GICS Sector" },
-    { name: "ppent", type: "Matrix, Fundamental", desc: "Net property, plant & equipment" },
+  // ---- 사용 가능한 데이터 필드 (실제 패널/EDGAR 펀더멘털 컬럼과 일치) ----
+  // [name, desc] — 자동완성 + 레퍼런스 패널 공용 소스
+  const FIELD_GROUPS = [
+    { group: "가격 · 거래량", items: [
+      ["close", "일별 종가"], ["open", "일별 시가"], ["high", "일별 고가"],
+      ["low", "일별 저가"], ["volume", "일별 거래량"], ["returns", "일별 수익률 (close 변화율)"],
+    ]},
+    { group: "밸류에이션 (파생)", items: [
+      ["cap", "시가총액 = shares × close"], ["pe", "주가수익비율 (close/eps)"],
+      ["pb", "주가순자산비율"], ["ps", "주가매출비율"], ["book_value", "주당 순자산 (BPS)"],
+    ]},
+    { group: "수익성 (파생)", items: [
+      ["roe", "자기자본이익률 (ni/equity)"], ["roa", "총자산이익률 (ni/assets)"],
+    ]},
+    { group: "재무상태표", items: [
+      ["cash", "현금 및 현금성자산"], ["debt", "총부채"], ["assets", "총자산"],
+      ["ppent", "유형자산 순액 (PP&E)"], ["equity", "자기자본"], ["inventory", "재고자산"],
+      ["shares", "발행주식수"], ["retained_earnings", "이익잉여금"],
+      ["current_assets", "유동자산"], ["current_liabilities", "유동부채"],
+    ]},
+    { group: "손익계산서", items: [
+      ["revenue", "매출액"], ["ni", "순이익"], ["gross_profit", "매출총이익"],
+      ["op_income", "영업이익"], ["ebit", "EBIT"], ["ebitda", "EBITDA"],
+      ["eps", "주당순이익 (희석)"], ["cost_of_revenue", "매출원가"],
+    ]},
+    { group: "현금흐름", items: [
+      ["fcf", "잉여현금흐름 (영업CF − capex)"], ["capex", "설비투자"], ["div_paid", "배당 지급액"],
+    ]},
+    { group: "그룹 (중립화용)", items: [
+      ["sector", "GICS 섹터 (industry · subindustry 와 동일)"],
+    ]},
   ];
+
+  // ---- 사용 가능한 연산자 (lib/operators.py 와 일치) ----
+  // [name, signature, desc]
+  const OP_GROUPS = [
+    { group: "산술", items: [
+      ["add", "add(x, y)", "x + y (filter=true 면 NaN→0)"], ["subtract", "subtract(x, y)", "x − y"],
+      ["multiply", "multiply(x, y, …)", "곱"], ["divide", "divide(x, y)", "x / y"],
+      ["log", "log(x)", "자연로그"], ["sqrt", "sqrt(x)", "제곱근(|x|)"],
+      ["abs", "abs(x)", "절댓값"], ["sign", "sign(x)", "부호 (−1/0/1)"],
+      ["power", "power(x, y)", "x의 y승"], ["signed_power", "signed_power(x, y)", "sign(x)·|x|^y"],
+      ["inverse", "inverse(x)", "1/x"], ["reverse", "reverse(x)", "−x"],
+      ["max", "max(x, y, …)", "원소별 최대"], ["min", "min(x, y, …)", "원소별 최소"],
+      ["to_nan", "to_nan(x, value=0)", "특정 값을 NaN 으로 (reverse=true 면 반대)"],
+    ]},
+    { group: "논리 · 조건", items: [
+      ["비교", "x > y, x < y, x == y", "조건 → 참/거짓 (1/0 처럼 사용)"],
+      ["삼항", "cond ? a : b", "조건이 참이면 a, 아니면 b (BRAIN 문법)"],
+      ["if_else", "if_else(cond, a, b)", "삼항과 동일한 함수형"],
+      ["is_nan", "is_nan(x)", "NaN 이면 1"],
+    ]},
+    { group: "횡단면 (그날 전 종목 기준)", items: [
+      ["rank", "rank(x)", "순위 → 0~1"], ["zscore", "zscore(x)", "표준화 (평균0 표준편차1)"],
+      ["winsorize", "winsorize(x, std=4)", "std 배 넘는 이상치 자르기"],
+      ["normalize", "normalize(x)", "평균 0 으로 이동"], ["scale", "scale(x, scale=1)", "|합|=scale 로 정규화"],
+      ["quantile", "quantile(x)", "분위수 변환 (정규/균등)"], ["scale_down", "scale_down(x)", "0~1 로 압축"],
+    ]},
+    { group: "시계열 (종목별 과거 d일)", items: [
+      ["ts_mean", "ts_mean(x, d)", "d일 이동평균"], ["ts_sum", "ts_sum(x, d)", "d일 합"],
+      ["ts_std_dev", "ts_std_dev(x, d)", "d일 표준편차"], ["ts_zscore", "ts_zscore(x, d)", "d일 z-score"],
+      ["ts_rank", "ts_rank(x, d)", "최근 d일 내 순위"], ["ts_delta", "ts_delta(x, d)", "x − d일 전 x"],
+      ["ts_delay", "ts_delay(x, d)", "d일 전 값"], ["ts_min", "ts_min(x, d)", "d일 최소"],
+      ["ts_max", "ts_max(x, d)", "d일 최대"], ["ts_av_diff", "ts_av_diff(x, d)", "x − d일 평균"],
+      ["ts_product", "ts_product(x, d)", "d일 곱"], ["ts_corr", "ts_corr(x, y, d)", "d일 상관계수"],
+      ["ts_covariance", "ts_covariance(y, x, d)", "d일 공분산"],
+      ["ts_decay_linear", "ts_decay_linear(x, d)", "최근일에 큰 가중치 (선형 감쇠)"],
+      ["ts_scale", "ts_scale(x, d)", "최근 d일 기준 0~1"], ["ts_arg_max", "ts_arg_max(x, d)", "최댓값까지 경과일"],
+      ["ts_arg_min", "ts_arg_min(x, d)", "최솟값까지 경과일"], ["ts_count_nans", "ts_count_nans(x, d)", "d일 내 NaN 개수"],
+      ["ts_backfill", "ts_backfill(x, d)", "NaN 을 최근 d일 내 값으로 채움 (결측 보정)"],
+      ["hump", "hump(x, hump=0.01)", "작은 변동 무시 (불필요한 거래 억제)"],
+    ]},
+    { group: "그룹 (섹터 등 그룹 내)", items: [
+      ["group_neutralize", "group_neutralize(x, group)", "그룹 평균을 빼 중립화"],
+      ["group_rank", "group_rank(x, group)", "그룹 내 순위"], ["group_zscore", "group_zscore(x, group)", "그룹 내 z-score"],
+      ["group_mean", "group_mean(x, group)", "그룹 평균"], ["group_min", "group_min(x, group)", "그룹 최소"],
+      ["group_max", "group_max(x, group)", "그룹 최대"], ["group_scale", "group_scale(x, group)", "그룹 내 0~1"],
+    ]},
+    { group: "변환", items: [
+      ["bucket", "bucket(x, range='0,1,0.1')", "연속값 → 구간(버킷) 인덱스"],
+      ["trade_when", "trade_when(cond, alpha, close)", "조건부 진입 / 청산"],
+    ]},
+  ];
+
+  // 자동완성 풀: 데이터 필드 + 함수형 연산자(식별자만, 비교/삼항 제외)
+  const variables = FIELD_GROUPS.flatMap((g) =>
+    g.items.map(([name, desc]) => ({ name, type: g.group, desc })));
+  const opAuto = OP_GROUPS.flatMap((g) =>
+    g.items.filter(([name]) => /^[a-z_]+$/.test(name))
+      .map(([name, sig, desc]) => ({ name, type: "함수 · " + g.group, desc, sig, fn: true })));
+  const acItems = variables.concat(opAuto);
+  const reference = { fields: FIELD_GROUPS, operators: OP_GROUPS };
 
   // example alphas
   const examples = [
@@ -205,12 +279,13 @@
     { label: "Quality — high ROE", expr: "rank(roe)" },
     { label: "Value — low P/E", expr: "rank(-pe)" },
     { label: "FCF yield", expr: "rank(fcf / cap)" },
+    { label: "Positive-day count (삼항)", expr: "ts_sum(returns > 0 ? 1 : 0, 250)" },
     { label: "Cap-bucket asset value", expr: "group_neutralize(\n  winsorize(ts_backfill((ppent + cash) / cap, 63), std=4),\n  bucket(rank(cap), range='0,1,0.1')\n)" },
   ];
 
   window.AB_DATA = {
     monthLabels, pnlScaled, isSummary, yearRows, indices, account,
     acctHist, dailyPerf, longs, shorts, buyOrders, sellOrders,
-    botLogs, news, aiSummary, variables, examples,
+    botLogs, news, aiSummary, variables, acItems, reference, examples,
   };
 })();
