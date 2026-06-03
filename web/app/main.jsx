@@ -126,10 +126,11 @@ function BacktestWorkspace({ state, tweaks }) {
 }
 
 const newSettings = () => {
+  // 실제 백테스트에 반영되는 세팅만 유지 (delay·neutralization·decay·truncation).
+  // region·universe 는 고정값이지만 상단 'USA/D1/S&P500' 라벨 표시에 사용.
   const base = {
-    language: "Fast Expression", instrument: "Equity", region: "USA", universe: "S&P 500",
-    delay: 1, neutralization: "Sector", decay: 0, truncation: 0.08, pasteurization: "On",
-    nanHandling: "Off", testYears: 1, testMonths: 0,
+    region: "USA", universe: "S&P 500",
+    delay: 1, neutralization: "Sector", decay: 0, truncation: 0.08,
   };
   // 서버에서 받은 실제 알파 세팅 반영 (있으면)
   const live = (typeof window !== "undefined" && window.AB_LIVE_CONFIG) ? window.AB_LIVE_CONFIG.settings : null;

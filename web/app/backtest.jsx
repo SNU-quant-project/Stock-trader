@@ -1,7 +1,6 @@
 /* ===== Backtest workspace shell (left pane: subbar + editor + settings + actions) ===== */
 
 const NEUT_OPTIONS = ["None", "Market", "Sector", "Cap Bucket", "Sector + Cap Bucket", "Subindustry"];
-const UNIV_OPTIONS = ["S&P 500", "TOP500", "TOP1000", "TOP3000"];
 
 function SettingsPanel({ settings, setSettings, onClose, onApply }) {
   const s = settings;
@@ -13,29 +12,16 @@ function SettingsPanel({ settings, setSettings, onClose, onApply }) {
       boxShadow: "0 20px 50px rgba(0,0,0,0.5)", padding: "22px 24px 24px",
       animation: "fadeUp .2s ease both",
     }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "18px 20px" }}>
-        <Field label="Language"><DarkSelect value={s.language} options={["Fast Expression", "Python"]} onChange={(v) => set("language", v)} /></Field>
-        <Field label="Instrument Type"><DarkSelect value={s.instrument} options={["Equity"]} onChange={(v) => set("instrument", v)} /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <Field label="Region"><DarkSelect value={s.region} options={["USA"]} onChange={(v) => set("region", v)} /></Field>
-          <Field label="Delay"><DarkSelect value={String(s.delay)} options={["0", "1"]} onChange={(v) => set("delay", +v)} /></Field>
-        </div>
-
-        <Field label="Universe"><DarkSelect value={s.universe} options={UNIV_OPTIONS} onChange={(v) => set("universe", v)} /></Field>
+      {/* 이 프로젝트에서 실제로 백테스트에 반영되는 세팅만 노출.
+          유니버스/리전/봉주기는 고정(USA · S&P 500 · 일봉)이라 상단 라벨로만 표시. */}
+      <div style={{ fontSize: 11.5, color: "var(--tx-on-dark-3)", marginBottom: 14 }}>
+        고정: <b style={{ color: "var(--tx-on-dark-2)" }}>USA · S&amp;P 500 · 일봉(D1)</b> — 아래 4개 세팅이 백테스트에 반영됩니다.
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr 1fr 1fr", gap: "18px 20px" }}>
         <Field label="Neutralization"><DarkSelect value={s.neutralization} options={NEUT_OPTIONS} onChange={(v) => set("neutralization", v)} /></Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
-          <Field label="Decay"><NumInput value={s.decay} step={1} onChange={(v) => set("decay", v)} /></Field>
-          <Field label="Truncation"><NumInput value={s.truncation} step={0.01} dec={2} onChange={(v) => set("truncation", v)} /></Field>
-        </div>
-
-        <Field label="Pasteurization"><DarkSelect value={s.pasteurization} options={["On", "Off"]} onChange={(v) => set("pasteurization", v)} /></Field>
-        <Field label="Nan Handling"><DarkSelect value={s.nanHandling} options={["Off", "On"]} onChange={(v) => set("nanHandling", v)} /></Field>
-        <Field label="Test Period">
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
-            <NumInput value={s.testYears} step={1} onChange={(v) => set("testYears", v)} suffix="YEARS" />
-            <NumInput value={s.testMonths} step={1} onChange={(v) => set("testMonths", v)} suffix="MONTHS" />
-          </div>
-        </Field>
+        <Field label="Delay"><DarkSelect value={String(s.delay)} options={["0", "1"]} onChange={(v) => set("delay", +v)} /></Field>
+        <Field label="Decay"><NumInput value={s.decay} step={1} onChange={(v) => set("decay", v)} /></Field>
+        <Field label="Truncation"><NumInput value={s.truncation} step={0.01} dec={2} onChange={(v) => set("truncation", v)} /></Field>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", marginTop: 22 }}>
