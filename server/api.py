@@ -21,6 +21,9 @@ import base64
 import subprocess
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+ET = ZoneInfo("America/New_York")  # 미국 장 기준 시간대 (포트폴리오 일별 라벨용)
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -262,15 +265,16 @@ def _todays_close_from_intraday(tc):
     try:
         from alpaca.trading.requests import GetPortfolioHistoryRequest
         h = tc.get_portfolio_history(history_filter=GetPortfolioHistoryRequest(period="1D", timeframe="1H"))
-        idf = pd.DataFrame({"ts": pd.to_datetime(h.timestamp, unit="s"), "equity": h.equity})
+        idf = pd.DataFrame({"ts": pd.to_datetime(h.timestamp, unit="s", utc=True), "equity": h.equity})
         idf = idf[idf["equity"].notna() & (idf["equity"] > 0)]
         if idf.empty:
             return None
-        idf["d"] = idf["ts"].dt.date
+        idf["et"] = idf["ts"].dt.tz_convert(ET)       # 미국 장 시간대 기준
+        idf["d"] = idf["et"].dt.date                   # ET 날짜 = 실제 거래일
         today = idf["d"].max()
         day = idf[idf["d"] == today]
-        # 정규장 종료(~20:00 UTC) 이내 값만 → 마감 시점. 없으면 마지막 값.
-        reg = day[day["ts"].dt.hour <= 20]
+        # 정규장 마감(16:00 ET) 이내 값만 → 마감 시점. 애프터장(>16시) 제외.
+        reg = day[day["et"].dt.hour <= 16]
         close_eq = float((reg if not reg.empty else day)["equity"].iloc[-1])
         return today, close_eq
     except Exception:
@@ -287,11 +291,13 @@ def get_portfolio_history(market_open=False, live_equity=None):
         from alpaca.trading.requests import GetPortfolioHistoryRequest
         tc = _trading_client()
         h = tc.get_portfolio_history(history_filter=GetPortfolioHistoryRequest(period="1M", timeframe="1D"))
-        df = pd.DataFrame({"ts": pd.to_datetime(h.timestamp, unit="s"), "equity": h.equity})
+        df = pd.DataFrame({"ts": pd.to_datetime(h.timestamp, unit="s", utc=True), "equity": h.equity})
         df = df[df["equity"].notna() & (df["equity"] > 0)].reset_index(drop=True)
         if df.empty:
             return [], []
-        df["d"] = df["ts"].dt.date
+        # 1D 종가는 00:00 UTC(= 전 거래일 마감 ET)로 찍히므로 ET 날짜로 라벨해야
+        # 실제 거래일과 일치. (UTC 날짜로 하면 +1일 밀려 마감 후에도 '오늘' 행이 생김)
+        df["d"] = df["ts"].dt.tz_convert(ET).dt.date
         dates = list(df["d"])
         equities = [float(x) for x in df["equity"]]
 
