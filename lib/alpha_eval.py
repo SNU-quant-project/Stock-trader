@@ -62,6 +62,12 @@ def _build_pit_fundamentals(fundamentals, dates, symbols, fallback_lag=FALLBACK_
     for field in fields:
         wide = merged.pivot(index="date", columns="symbol", values=field)
         wide = wide.reindex(index=dates, columns=symbols)
+        # 항목을 날짜축으로 forward-fill: 일부 기업은 PP&E 등 일부 항목을
+        # 연 1회(10-K)만 보고해 분기 행에 NaN 이 생긴다. 가장 최근 보고값을
+        # 다음 보고 전까지 이어줘야 그 종목이 유니버스에서 빠지지 않음
+        # (BRAIN 의 date_coverage 100% 와 동일한 동작). 이미 발표일 기준
+        # merge_asof 된 값이라 look-ahead 없음.
+        wide = wide.ffill()
         result[field] = wide.astype(float)
     return result
 
@@ -78,9 +84,11 @@ def build_namespace(panel, fundamentals, sector_series, universe_mask=None):
     high = panel["high"].unstack(level="symbol") if "high" in panel.columns else close
     low = panel["low"].unstack(level="symbol") if "low" in panel.columns else close
     volume = panel["volume"].unstack(level="symbol") if "volume" in panel.columns else close
+    # raw(미보정) close — cap=시총 계산용. 없으면(구버전 패널) split보정 close 로 폴백.
+    close_raw = panel["close_raw"].unstack(level="symbol") if "close_raw" in panel.columns else close
 
     # 인덱스를 date 로 (timezone 제거)
-    for df in (close, open_, high, low, volume):
+    for df in (close, open_, high, low, volume, close_raw):
         idx = df.index.normalize()
         if hasattr(idx, "tz") and idx.tz is not None:
             idx = idx.tz_localize(None)
@@ -95,16 +103,19 @@ def build_namespace(panel, fundamentals, sector_series, universe_mask=None):
     # === 가격에 따라 매일 변하는 derived fundamentals ===
     if "shares" in fund_broadcast:
         shares_df = fund_broadcast["shares"]
-        fund_broadcast["cap"] = shares_df * close
+        # cap = 실제 시총 = 주식수 × 실제(raw)가격. 분할보정 가격을 쓰면 분할 전 구간 시총이 어긋남.
+        fund_broadcast["cap"] = shares_df * close_raw
+        # pe/pb/ps 도 raw 가격 사용: EDGAR 주당지표(eps, bps)가 분할 전(as-reported)
+        # 기준이라 close_raw 와 맞춰야 분할 종목의 분할 전 비율이 어긋나지 않음.
         if "eps" in fund_broadcast:
-            fund_broadcast["pe"] = close / fund_broadcast["eps"].replace(0, np.nan)
+            fund_broadcast["pe"] = close_raw / fund_broadcast["eps"].replace(0, np.nan)
         if "equity" in fund_broadcast:
             # book_value per share = equity / shares → pb = close / (equity/shares)
             bps = fund_broadcast["equity"] / shares_df.replace(0, np.nan)
             fund_broadcast["book_value"] = bps
-            fund_broadcast["pb"] = close / bps.replace(0, np.nan)
+            fund_broadcast["pb"] = close_raw / bps.replace(0, np.nan)
         if "revenue" in fund_broadcast:
-            fund_broadcast["ps"] = (shares_df * close) / fund_broadcast["revenue"].replace(0, np.nan)
+            fund_broadcast["ps"] = (shares_df * close_raw) / fund_broadcast["revenue"].replace(0, np.nan)
         if "ni" in fund_broadcast:
             # ROE = NI / equity
             if "equity" in fund_broadcast:

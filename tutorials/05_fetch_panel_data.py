@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
+from alpaca.data.enums import Adjustment
 
 from lib.sp500_universe import load_data, get_sp500_members_at
 
@@ -48,35 +49,21 @@ def build_universe(start_date, end_date):
     return sorted(union)
 
 
-def fetch_panel(symbols, start_date, end_date):
-    """Alpaca에서 종목 리스트의 일봉을 배치로 받아 panel DataFrame 반환."""
-    load_dotenv()
-    client = StockHistoricalDataClient(
-        os.getenv("ALPACA_API_KEY"),
-        os.getenv("ALPACA_SECRET_KEY"),
-    )
-
-    # 날짜 변환
-    start_dt = pd.to_datetime(start_date).tz_localize(timezone.utc)
-    end_dt = pd.to_datetime(end_date).tz_localize(timezone.utc)
-
-    all_dfs = []
-    failed_batches = []
-    total_batches = (len(symbols) + BATCH_SIZE - 1) // BATCH_SIZE
-
+def _fetch_bars(client, symbols, start_dt, end_dt, adjustment, label):
+    """주어진 adjustment 로 배치 다운로드 → 합친 DataFrame, 실패배치 리스트."""
+    all_dfs, failed = [], []
+    total = (len(symbols) + BATCH_SIZE - 1) // BATCH_SIZE
     for i in range(0, len(symbols), BATCH_SIZE):
         batch = symbols[i : i + BATCH_SIZE]
-        batch_num = i // BATCH_SIZE + 1
-        print(f"  배치 {batch_num}/{total_batches} "
-              f"({batch[0]} ~ {batch[-1]}) 요청 중... ", end="", flush=True)
-
+        bn = i // BATCH_SIZE + 1
+        print(f"  [{label}] 배치 {bn}/{total} ({batch[0]}~{batch[-1]})... ", end="", flush=True)
         request = StockBarsRequest(
             symbol_or_symbols=batch,
             timeframe=TimeFrame.Day,
             start=start_dt,
             end=end_dt,
+            adjustment=adjustment,
         )
-
         try:
             bars = client.get_stock_bars(request)
             if not bars.df.empty:
@@ -86,15 +73,35 @@ def fetch_panel(symbols, start_date, end_date):
                 print("빈 응답")
         except Exception as e:
             print(f"실패: {e}")
-            failed_batches.append((batch_num, batch))
-
-        time.sleep(0.3)  # Rate limit 안전 마진
-
+            failed.append((bn, batch))
+        time.sleep(0.3)
     if not all_dfs:
-        raise RuntimeError("모든 배치가 실패했습니다.")
+        raise RuntimeError(f"[{label}] 모든 배치 실패")
+    return pd.concat(all_dfs), failed
 
-    panel = pd.concat(all_dfs)
-    return panel, failed_batches
+
+def fetch_panel(symbols, start_date, end_date):
+    """Alpaca 일봉 panel.
+
+    중요: 분할(split) 보정 안 하면 분할일에 가짜 폭락이 생겨 수익률이 망가짐.
+      - OHLCV: SPLIT 보정 → 수익률/ts 연산에 사용
+      - close_raw: RAW(미보정) close → cap = shares × 실제가격 계산에 사용
+        (cap 은 실제 시총이어야 하므로 분할보정 가격을 쓰면 분할 전 구간이 어긋남)
+    """
+    load_dotenv()
+    client = StockHistoricalDataClient(
+        os.getenv("ALPACA_API_KEY"),
+        os.getenv("ALPACA_SECRET_KEY"),
+    )
+    start_dt = pd.to_datetime(start_date).tz_localize(timezone.utc)
+    end_dt = pd.to_datetime(end_date).tz_localize(timezone.utc)
+
+    panel, failed = _fetch_bars(client, symbols, start_dt, end_dt, Adjustment.SPLIT, "split보정")
+    raw, _ = _fetch_bars(client, symbols, start_dt, end_dt, Adjustment.RAW, "raw")
+    # raw close 를 close_raw 컬럼으로 합침 (인덱스 정렬)
+    panel = panel.copy()
+    panel["close_raw"] = raw["close"].reindex(panel.index)
+    return panel, failed
 
 
 # === 메인 ===

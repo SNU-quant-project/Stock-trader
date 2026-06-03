@@ -28,6 +28,7 @@ from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
+from alpaca.data.enums import Adjustment
 
 from lib.sp500_universe import load_data, get_sp500_members_at
 from lib.alpha_eval import evaluate
@@ -55,20 +56,28 @@ def fetch_recent_panel(data_client, symbols, lookback_days=15, batch_size=50):
     end = datetime.now(timezone.utc) - timedelta(minutes=20)  # SIP 지연 회피
     start = end - timedelta(days=lookback_days + 14)
 
-    dfs = []
-    for i in range(0, len(symbols), batch_size):
-        batch = symbols[i:i + batch_size]
-        req = StockBarsRequest(
-            symbol_or_symbols=batch,
-            timeframe=TimeFrame.Day,
-            start=start,
-            end=end,
-        )
-        bars = data_client.get_stock_bars(req)
-        if not bars.df.empty:
-            dfs.append(bars.df)
+    def _fetch(adj):
+        dfs = []
+        for i in range(0, len(symbols), batch_size):
+            batch = symbols[i:i + batch_size]
+            req = StockBarsRequest(
+                symbol_or_symbols=batch, timeframe=TimeFrame.Day,
+                start=start, end=end, adjustment=adj,
+            )
+            bars = data_client.get_stock_bars(req)
+            if not bars.df.empty:
+                dfs.append(bars.df)
+        return pd.concat(dfs) if dfs else pd.DataFrame()
 
-    return pd.concat(dfs) if dfs else pd.DataFrame()
+    # OHLCV: split 보정(수익률용) / close_raw: raw(cap=시총용) — 백테스트 패널과 동일
+    panel = _fetch(Adjustment.SPLIT)
+    if panel.empty:
+        return panel
+    raw = _fetch(Adjustment.RAW)
+    if not raw.empty:
+        panel = panel.copy()
+        panel["close_raw"] = raw["close"].reindex(panel.index)
+    return panel
 
 
 # === 3. 알파 계산 (마지막 날만) ===
