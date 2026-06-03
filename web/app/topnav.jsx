@@ -7,6 +7,7 @@ const NAV_TABS = [
   { id: "positions",   label: "Positions",   icon: "bars" },
   { id: "botlogs",     label: "Bot Logs",    icon: "doc" },
   { id: "news",        label: "News",        icon: "news" },
+  { id: "alphas",      label: "Alphas",      icon: "alpha" },
   { id: "feedback",    label: "제안",        icon: "list" },
 ];
 

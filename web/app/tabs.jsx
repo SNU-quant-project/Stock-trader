@@ -73,10 +73,12 @@ function AccountCards() {
 const DONUT_COLORS = ["#22a06b", "#2f7ce0", "#7c5cff", "#e0792f", "#16a36a", "#d94a6a", "#0fb5c4", "#9b8b3f", "#5b6577", "#c0c7d2"];
 
 function SideBlock({ rows, title, dotColor, valueKey, weightFromCost }) {
+  const [showAll, setShowAll] = React.useState(false);
   const total = rows.reduce((s, r) => s + Math.abs(r[valueKey]), 0) || 1;
   const sorted = [...rows].sort((a, b) => Math.abs(b[valueKey]) - Math.abs(a[valueKey]));
   const donutItems = sorted.slice(0, 6).map((r) => ({ label: r.sym, value: Math.abs(r[valueKey]) }));
   const totPl = rows.reduce((s, r) => s + (r.pl || 0), 0);
+  const visible = showAll ? sorted : sorted.slice(0, 8);
   return (
     <Card>
       <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 6 }}>
@@ -99,7 +101,7 @@ function SideBlock({ rows, title, dotColor, valueKey, weightFromCost }) {
           </tr>
         </thead>
         <tbody>
-          {sorted.slice(0, 8).map((r) => (
+          {visible.map((r) => (
             <tr key={r.sym} style={{ borderBottom: "1px solid #f0f2f6" }}>
               <td style={{ padding: "8px 4px", fontWeight: 700 }}>
                 <a href={`https://finance.yahoo.com/quote/${r.sym}/`} target="_blank" rel="noopener noreferrer"
@@ -118,6 +120,18 @@ function SideBlock({ rows, title, dotColor, valueKey, weightFromCost }) {
           ))}
         </tbody>
       </table>
+      {sorted.length > 8 && (
+        <button onClick={() => setShowAll((v) => !v)} style={{
+          width: "100%", marginTop: 10, padding: "9px 0", borderRadius: 8,
+          border: "1px solid var(--res-line)", background: "var(--res-alt)",
+          color: "var(--tx-on-light-2)", fontSize: 12.5, fontWeight: 600,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 6, cursor: "pointer",
+        }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#eef1f6"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "var(--res-alt)"; }}>
+          {showAll ? <>접기 <Icon name="chevU" size={14} /></> : <>전체 {sorted.length}종목 보기 <Icon name="chevD" size={14} /></>}
+        </button>
+      )}
     </Card>
   );
 }
@@ -126,28 +140,54 @@ function SideBlock({ rows, title, dotColor, valueKey, weightFromCost }) {
 function PerformanceTab() {
   const D = window.AB_DATA;
   const [period, setPeriod] = React.useState("1M");
-  const eqVals = D.acctHist.map((h) => h.equity);
-  const eqLabels = D.acctHist.map((h) => h.date);
+  const [bench, setBench] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  React.useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    fetch(`/api/benchmark?period=${period}`).then((r) => r.json())
+      .then((d) => { if (alive) { setBench(d); setLoading(false); } })
+      .catch(() => { if (alive) { setBench({ labels: [], series: [] }); setLoading(false); } });
+    return () => { alive = false; };
+  }, [period]);
+
+  const series = (bench && bench.series) || [];
+  const labels = (bench && bench.labels) || [];
+  const finalOf = (s) => { for (let i = s.values.length - 1; i >= 0; i--) { if (s.values[i] != null) return s.values[i]; } return null; };
+  const eq = D.account ? D.account.equity : (D.acctHist.length ? D.acctHist[D.acctHist.length - 1].equity : 0);
+
   return (
     <Page title="Performance" sub="Alpaca 페이퍼 계좌의 실거래 성과. 봇 로그에 시점별 종목 PnL 도 누적됩니다.">
       <AccountCards />
       <Card style={{ marginBottom: 22 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <SectionTitle style={{ margin: 0 }}>Equity Curve</SectionTitle>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", gap: 10 }}>
+          <SectionTitle style={{ margin: 0 }}>수익률 비교 <span style={{ fontSize: 12, fontWeight: 500, color: "var(--tx-on-light-3)" }}>내 포트폴리오 vs S&amp;P 500 · NASDAQ · 기간 시작 = 0%</span></SectionTitle>
           <div style={{ display: "flex", gap: 3, background: "var(--res-alt)", borderRadius: 16, padding: 3, border: "1px solid var(--res-line)" }}>
-            {["1W", "1M", "3M", "1Y", "ALL"].map((p) => (
+            {["1M", "3M", "6M", "1Y", "ALL"].map((p) => (
               <button key={p} onClick={() => setPeriod(p)} style={{ padding: "5px 13px", borderRadius: 13, fontSize: 12, fontWeight: 700, background: p === period ? "var(--accent)" : "transparent", color: p === period ? "#fff" : "var(--tx-on-light-2)" }}>{p}</button>
             ))}
           </div>
         </div>
-        <LineChart values={eqVals} labels={eqLabels} height={280} color="var(--accent)"
-          yFmt={(v) => {
-            const span = Math.max(...eqVals) - Math.min(...eqVals);
-            // 값 폭이 작으면 (~$1K 미만) 소수점까지 표시해 라벨이 다 같은 "$100K" 로 뭉개지지 않게
-            return span < 2000 ? "$" + (v / 1000).toFixed(2) + "K" : "$" + (v / 1000).toFixed(0) + "K";
-          }} />
+        {/* legend + 기간 최종 수익률 */}
+        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 8 }}>
+          {series.map((s) => {
+            const f = finalOf(s);
+            return (
+              <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <span style={{ width: 16, height: 3, borderRadius: 2, background: s.color, display: "inline-block" }} />
+                <span style={{ fontSize: 12.5, color: "var(--tx-on-light-2)" }}>{s.name}</span>
+                {f != null && <span className="tabnum" style={{ fontSize: 12.5, fontWeight: 700, color: f >= 0 ? "var(--up)" : "var(--down)" }}>{(f >= 0 ? "+" : "") + f.toFixed(2) + "%"}</span>}
+              </div>
+            );
+          })}
+        </div>
+        {loading ? (
+          <div style={{ height: 280, display: "grid", placeItems: "center", color: "var(--tx-on-light-3)", fontSize: 13 }}>불러오는 중…</div>
+        ) : (
+          <MultiLineChart series={series} labels={labels} height={280} />
+        )}
         <div style={{ fontSize: 12.5, color: "var(--tx-on-light-2)", marginTop: 8 }}>
-          시작 {fmtUSD(eqVals[0])} → 현재 {fmtUSD(eqVals[eqVals.length - 1])} <span style={{ color: (eqVals[eqVals.length - 1] / eqVals[0] - 1) >= 0 ? "var(--up)" : "var(--down)", fontWeight: 700 }}>({fmtPct(eqVals[eqVals.length - 1] / eqVals[0] - 1)})</span> <span style={{ color: "var(--tx-on-light-3)" }}>· 기간 전체 기준 (상단 Equity 카드는 전일 대비)</span>
+          현재 잔고 <b style={{ color: "var(--tx-on-light)" }}>{fmtUSD(eq)}</b> <span style={{ color: "var(--tx-on-light-3)" }}>· 차트는 선택 기간 시작 대비 누적수익률(%). 같은 기간 지수 대비 초과/부진을 한눈에 비교.</span>
         </div>
       </Card>
 
@@ -266,11 +306,47 @@ function OrdersTab() {
   );
 }
 
+// ---- 현재 운용 중인 알파 (Positions 상단) ----
+function CurrentAlphaCard() {
+  const cfg = (typeof window !== "undefined" && window.AB_LIVE_CONFIG) || null;
+  const expr = (cfg && cfg.expression) || "rank(-returns)";
+  const s = (cfg && cfg.settings) || {};
+  const desc = cfg && cfg.description;
+  const chips = [
+    ["Neutralization", s.neutralization], ["Delay", s.delay],
+    ["Decay", s.decay], ["Truncation", s.truncation],
+  ].filter(([, v]) => v !== undefined && v !== null && v !== "");
+  return (
+    <Card style={{ marginBottom: 18, background: "linear-gradient(160deg,#0f1320,#161a28)", border: "none" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 12 }}>
+        <AlphaMark size={20} color="var(--accent-hi)" />
+        <span style={{ fontSize: 15, fontWeight: 700, color: "#fff" }}>현재 운용 중인 알파</span>
+        <span style={{ fontSize: 10.5, fontWeight: 700, padding: "2px 8px", borderRadius: 5, background: "rgba(34,160,107,0.2)", color: "var(--accent-hi)", letterSpacing: 0.5 }}>LIVE</span>
+        <span style={{ fontSize: 11.5, color: "var(--tx-on-dark-3)" }}>이 포지션을 만든 수식 · 고정: USA · S&amp;P 500 · 일봉(D1)</span>
+      </div>
+      <pre style={{
+        margin: 0, fontFamily: "var(--font-mono)", fontSize: 13, color: "var(--accent-hi)",
+        background: "rgba(0,0,0,0.28)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8,
+        padding: "12px 14px", whiteSpace: "pre-wrap", lineHeight: 1.5, overflowX: "auto",
+      }}>{expr}</pre>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 12 }}>
+        {chips.map(([k, v]) => (
+          <span key={k} style={{ fontSize: 11.5, color: "var(--tx-on-dark-2)", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6, padding: "4px 10px" }}>
+            {k} <b style={{ color: "#fff" }}>{String(v)}</b>
+          </span>
+        ))}
+      </div>
+      {desc && <div style={{ fontSize: 12.5, color: "var(--tx-on-dark-2)", marginTop: 10, lineHeight: 1.5 }}>{desc}</div>}
+    </Card>
+  );
+}
+
 // ===== Positions =====
 function PositionsTab() {
   const D = window.AB_DATA;
   return (
     <Page title="Positions" sub="비중 = |market_value| / 총 gross. 회사명 클릭 → Yahoo Finance.">
+      <CurrentAlphaCard />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
         <SideBlock rows={D.longs} title="🟢 Long" dotColor="var(--up)" valueKey="marketValue" />
         <SideBlock rows={D.shorts} title="🔴 Short" dotColor="var(--down)" valueKey="marketValue" />

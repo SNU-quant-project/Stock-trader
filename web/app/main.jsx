@@ -178,6 +178,16 @@ function App() {
     }
     setTabs(next);
   }
+  // 공유 알파를 새 시뮬레이션 탭으로 열기 (Alphas 탭 → Backtest)
+  function addTabWith(expr, settings) {
+    const id = tabs.length === 0 ? 1 : seqRef.current + 1;
+    seqRef.current = id;
+    const tab = { ...newTab(id, expr || ""), settings: { ...newSettings(), ...(settings || {}) } };
+    setTabs((ts) => [...ts, tab]);
+    setActiveId(id);
+    setActiveTab("backtest");
+    setShowSettings(false);
+  }
 
   function onSimulate() {
     const id = activeId;
@@ -291,6 +301,7 @@ function App() {
       {activeTab === "positions" && <PositionsTab />}
       {activeTab === "botlogs" && <BotLogsTab />}
       {activeTab === "news" && <NewsTab />}
+      {activeTab === "alphas" && <AlphasTab toast={toast} onUse={(expr, settings) => { addTabWith(expr, settings); toast('✅ <b>백테스트 탭에 불러왔어요</b> — Simulate 를 눌러 검증하세요.'); }} />}
       {activeTab === "feedback" && <FeedbackTab />}
 
       {toastMsg && <Toast msg={toastMsg} onClose={() => setToastMsg(null)} />}

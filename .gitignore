@@ -31,3 +31,6 @@ bot/logs/
 
 # 팀원 개선 제안 (런타임 데이터)
 bot/feedback/
+
+# 유저 공유 알파 (런타임 데이터)
+bot/alphas.jsonl

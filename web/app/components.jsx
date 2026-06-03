@@ -131,6 +131,61 @@ function LineChart({ values, labels, height = 300, color = "#16a36a", yFmt, fill
   );
 }
 
+// ---- Multi-line chart (수익률 비교: 포트폴리오 vs 지수) ----
+function MultiLineChart({ series, labels, height = 300, yFmt }) {
+  const ref = React.useRef(null);
+  const [w, setW] = React.useState(900);
+  React.useEffect(() => {
+    if (!ref.current) return;
+    const ro = new ResizeObserver((e) => setW(e[0].contentRect.width));
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, []);
+  const padL = 54, padR = 14, padT = 12, padB = 26;
+  const all = series.flatMap((s) => s.values).filter((v) => v != null && !isNaN(v));
+  if (!all.length || labels.length < 2) {
+    return <div style={{ height, display: "grid", placeItems: "center", color: "var(--tx-on-light-3)", fontSize: 13 }}>비교할 데이터가 부족합니다.</div>;
+  }
+  const min = Math.min(...all, 0), max = Math.max(...all, 0);
+  const rng = (max - min) || 1;
+  const n = labels.length;
+  const X = (i) => padL + (i * (w - padL - padR)) / Math.max(1, n - 1);
+  const Y = (v) => padT + (1 - (v - min) / rng) * (height - padT - padB);
+  const gridN = 5;
+  const grid = Array.from({ length: gridN + 1 }, (_, i) => { const v = min + (rng * i) / gridN; return { y: Y(v), v }; });
+  const tickEvery = Math.max(1, Math.ceil(n / 9));
+  const segsFor = (vals) => {
+    const segs = []; let cur = [];
+    vals.forEach((v, i) => {
+      if (v == null || isNaN(v)) { if (cur.length) { segs.push(cur); cur = []; } }
+      else cur.push(`${X(i)},${Y(v)}`);
+    });
+    if (cur.length) segs.push(cur);
+    return segs;
+  };
+  const zeroY = Y(0);
+  return (
+    <div ref={ref} style={{ width: "100%" }}>
+      <svg width={w} height={height} style={{ display: "block" }}>
+        {grid.map((g, i) => (
+          <g key={i}>
+            <line x1={padL} y1={g.y} x2={w - padR} y2={g.y} stroke="#eceef3" strokeWidth="1" />
+            <text x={padL - 8} y={g.y + 3} textAnchor="end" fontSize="10" fill="#9aa3b2" fontFamily="var(--font-num)">{yFmt ? yFmt(g.v) : (g.v >= 0 ? "+" : "") + g.v.toFixed(1) + "%"}</text>
+          </g>
+        ))}
+        <line x1={padL} y1={zeroY} x2={w - padR} y2={zeroY} stroke="#c0c7d2" strokeWidth="1" strokeDasharray="3 3" />
+        {series.map((s, si) => segsFor(s.values).map((seg, gi) => (
+          <polyline key={si + "-" + gi} points={seg.join(" ")} fill="none" stroke={s.color}
+            strokeWidth={si === 0 ? 2.6 : 1.8} strokeLinejoin="round" strokeLinecap="round" opacity={si === 0 ? 1 : 0.85} />
+        )))}
+        {labels.map((lb, i) => i % tickEvery === 0 ? (
+          <text key={i} x={X(i)} y={height - 8} textAnchor="middle" fontSize="10" fill="#9aa3b2" fontFamily="var(--font-num)">{lb}</text>
+        ) : null)}
+      </svg>
+    </div>
+  );
+}
+
 // ---- Donut ----
 function Donut({ items, size = 220, colors }) {
   const total = items.reduce((s, x) => s + x.value, 0) || 1;
@@ -164,5 +219,5 @@ function Donut({ items, size = 220, colors }) {
 
 Object.assign(window, {
   fmtUSD, fmtUSD0, fmtPct, fmtPctRaw, fmtNum, fmtPermil,
-  Icon, Ic, ICONS, AlphaMark, Sparkline, LineChart, Donut,
+  Icon, Ic, ICONS, AlphaMark, Sparkline, LineChart, MultiLineChart, Donut,
 });

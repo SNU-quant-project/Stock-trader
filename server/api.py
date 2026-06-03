@@ -45,6 +45,7 @@ LOG_DIR = ROOT / "bot" / "logs"
 FEEDBACK_DIR = ROOT / "bot" / "feedback"        # 팀원 개선 제안 저장 (gitignore)
 FEEDBACK_FILE = FEEDBACK_DIR / "feedback.jsonl"
 SHOTS_DIR = FEEDBACK_DIR / "shots"
+ALPHAS_FILE = ROOT / "bot" / "alphas.jsonl"      # 유저 공유 알파 (gitignore)
 
 app = FastAPI(title="SNU Quant Alpha Bot API")
 
@@ -325,6 +326,57 @@ def get_portfolio_history(market_open=False, live_equity=None):
         return acct_hist, daily
     except Exception:
         return [], []
+
+
+def _build_benchmark(period):
+    """포트폴리오 vs S&P500(^GSPC)·NASDAQ(^IXIC) 동일기간 누적수익률(%) 비교.
+    반환: {labels, dates, series:[{name, values(%), color}]}  (values 는 기간 시작=0% 기준)
+    """
+    from alpaca.trading.requests import GetPortfolioHistoryRequest
+    AP = {"1W": "1W", "1M": "1M", "3M": "3M", "6M": "6M", "1Y": "1A", "ALL": "all"}
+    ap = AP.get(period, "1M")
+    tc = _trading_client()
+    h = tc.get_portfolio_history(history_filter=GetPortfolioHistoryRequest(period=ap, timeframe="1D"))
+    df = pd.DataFrame({"ts": pd.to_datetime(h.timestamp, unit="s", utc=True), "equity": h.equity})
+    df = df[df["equity"].notna() & (df["equity"] > 0)]
+    if len(df) < 2:
+        return {"labels": [], "dates": [], "series": []}
+    # 1D 종가는 00:00 UTC(= 전 거래일 ET 마감) → ET 날짜로 라벨 (포트폴리오 곡선과 동일 규칙)
+    df["d"] = df["ts"].dt.tz_convert(ET).dt.normalize().dt.tz_localize(None)
+    df = df.drop_duplicates("d", keep="last").sort_values("d").reset_index(drop=True)
+    eq = df["equity"].astype(float)
+    port = ((eq / eq.iloc[0] - 1) * 100).round(2).tolist()
+    port_idx = pd.DatetimeIndex(df["d"])
+    series = [{"name": "내 포트폴리오", "values": port, "color": "var(--accent)"}]
+
+    # 인덱스 동일 구간 종가 → 거래일 정렬 후 누적%
+    try:
+        import yfinance as yf
+        start = port_idx[0].date().isoformat()
+        end = (port_idx[-1] + pd.Timedelta(days=4)).date().isoformat()
+        bench = [("^GSPC", "S&P 500", "#2f7ce0"), ("^IXIC", "NASDAQ", "#e0792f")]
+        ydata = yf.download([b[0] for b in bench], start=start, end=end, interval="1d",
+                            auto_adjust=True, progress=False, group_by="ticker", threads=True)
+        for sym, label, color in bench:
+            try:
+                sub = ydata[sym] if isinstance(ydata.columns, pd.MultiIndex) else ydata
+                close = sub["Close"].dropna()
+                close.index = pd.DatetimeIndex(close.index).tz_localize(None).normalize()
+                aligned = close.reindex(port_idx, method="ffill")
+                valid = aligned.dropna()
+                if valid.empty:
+                    continue
+                base = float(valid.iloc[0])
+                vals = [round(float(x / base - 1) * 100, 2) if pd.notna(x) else None for x in aligned]
+                series.append({"name": label, "values": vals, "color": color})
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    fmt = "%m/%d" if os.name == "nt" else "%-m/%-d"
+    labels = [d.strftime(fmt) for d in port_idx]
+    return {"labels": labels, "dates": [d.date().isoformat() for d in port_idx], "series": series}
 
 
 # ============ 시장 지수 (yfinance) ============
@@ -650,6 +702,55 @@ EXAMPLES = [
 
 # ============ 라우트 ============
 
+# ============ 유저 공유 알파 (Alphas 탭) ============
+
+def _read_alphas():
+    if not ALPHAS_FILE.exists():
+        return []
+    out = []
+    for line in ALPHAS_FILE.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            out.append(json.loads(line))
+        except Exception:
+            pass
+    return out
+
+
+@app.get("/api/alphas")
+def api_get_alphas():
+    items = _read_alphas()
+    items.sort(key=lambda x: x.get("ts", ""), reverse=True)
+    return {"items": items}
+
+
+@app.post("/api/alphas")
+async def api_post_alpha(req: Request):
+    """유저가 만든 알파 공유 (이름/작성자/수식/세팅/설명)."""
+    body = await req.json()
+    expression = (body.get("expression") or "").strip()
+    if not expression:
+        return JSONResponse({"error": "수식(expression)이 비어있습니다"}, status_code=400)
+    author = (body.get("author") or "익명").strip()[:40] or "익명"
+    name = (body.get("name") or "").strip()[:80] or expression.split("\n")[0][:40]
+    settings = body.get("settings") or {}
+    clean = {k: settings.get(k) for k in ("neutralization", "delay", "decay", "truncation") if settings.get(k) is not None}
+    desc = (body.get("description") or "").strip()[:2000]
+    item = {
+        "id": str(int(time.time() * 1000)),
+        "ts": datetime.now(ET).strftime("%Y-%m-%d %H:%M"),
+        "author": author, "name": name, "expression": expression[:4000],
+        "settings": clean, "description": desc,
+    }
+    items = _read_alphas()
+    items.append(item)
+    ALPHAS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ALPHAS_FILE.write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in items) + "\n", encoding="utf-8")
+    return {"ok": True, "id": item["id"]}
+
+
 @app.get("/api/data")
 def api_data():
     out = {"variables": VARIABLES, "examples": EXAMPLES, "config": read_config()}
@@ -693,6 +794,16 @@ def api_pnl():
         data = cached(f"pnl_{market_open}", 900, lambda: get_pnl_by_symbol(market_open))
     except Exception as e:
         return JSONResponse({"rows": [], "startDate": "", "_err": str(e)})
+    return JSONResponse(data)
+
+
+@app.get("/api/benchmark")
+def api_benchmark(period: str = "1M"):
+    """기간별 포트폴리오 vs S&P500·NASDAQ 누적수익률 비교."""
+    try:
+        data = cached(f"bench_{period}", 300, lambda: _build_benchmark(period))
+    except Exception as e:
+        return JSONResponse({"labels": [], "dates": [], "series": [], "_err": str(e)})
     return JSONResponse(data)
 
 
@@ -821,8 +932,24 @@ async def api_run(req: Request):
 
 
 # ---- 정적 파일 (web/) ----
+_NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
+
+
 @app.get("/")
 def index():
-    return FileResponse(WEB_DIR / "index.html")
+    # no-cache: 배포 후 사용자가 하드리프레시 없이도 최신 index 를 받게 함
+    return FileResponse(WEB_DIR / "index.html", headers=_NO_CACHE)
 
-app.mount("/app", StaticFiles(directory=WEB_DIR / "app"), name="app")
+
+@app.get("/app/{path:path}")
+def app_files(path: str):
+    """web/app 정적 파일을 no-cache 로 서빙.
+    StaticFiles 는 휴리스틱 캐시로 옛 JS 가 남아 배포 후 하드리프레시가 필요했음.
+    no-cache(매번 재검증)면 변경분만 200, 동일하면 304 → 항상 최신 + 빠름."""
+    base = (WEB_DIR / "app").resolve()
+    f = (base / path).resolve()
+    if base != f and base not in f.parents:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if not f.is_file():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(f, headers=_NO_CACHE)
