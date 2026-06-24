@@ -910,6 +910,18 @@ def api_benchmark(period: str = "1M"):
     return JSONResponse(data)
 
 
+@app.get("/api/kospi")
+def api_kospi():
+    """KOSPI 모의 트레이딩 데이터: 현재 알파 + 현재 포지션 + 1년 지수(KOSPI) 비교.
+    알파 평가 + 1년 백테스트가 무거워 캐시(1시간)."""
+    try:
+        from lib.kospi import build_page_data
+        data = cached("kospi_page", 3600, build_page_data)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    return JSONResponse(data)
+
+
 @app.get("/api/config")
 def api_get_config():
     return read_config()
@@ -1042,6 +1054,12 @@ _NO_CACHE = {"Cache-Control": "no-cache, must-revalidate"}
 def index():
     # no-cache: 배포 후 사용자가 하드리프레시 없이도 최신 index 를 받게 함
     return FileResponse(WEB_DIR / "index.html", headers=_NO_CACHE)
+
+
+@app.get("/kospi")
+def kospi_page():
+    # KOSPI 모의 트레이딩 페이지 (독립 SPA)
+    return FileResponse(WEB_DIR / "kospi.html", headers=_NO_CACHE)
 
 
 @app.get("/app/{path:path}")

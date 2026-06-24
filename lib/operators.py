@@ -78,16 +78,37 @@ def _stack(*args):
 
 
 def max_(*args):
-    # DataFrame 들이면 element-wise max
+    # 전부 DataFrame → element-wise max (인덱스 정렬)
     if all(isinstance(a, pd.DataFrame) for a in args):
         return pd.concat([a.stack() for a in args], axis=1).max(axis=1).unstack()
-    return np.maximum.reduce(args)
+    # DataFrame + 스칼라 혼합 → DataFrame 형태 보존 (clip). max(x, 0) 같은 식 지원.
+    out = args[0]
+    for a in args[1:]:
+        if isinstance(out, pd.DataFrame) and np.isscalar(a):
+            out = out.clip(lower=a)
+        elif isinstance(a, pd.DataFrame) and np.isscalar(out):
+            out = a.clip(lower=out)
+        elif isinstance(out, pd.DataFrame) and isinstance(a, pd.DataFrame):
+            out = pd.concat([out.stack(), a.stack()], axis=1).max(axis=1).unstack()
+        else:
+            out = np.maximum(out, a)
+    return out
 
 
 def min_(*args):
     if all(isinstance(a, pd.DataFrame) for a in args):
         return pd.concat([a.stack() for a in args], axis=1).min(axis=1).unstack()
-    return np.minimum.reduce(args)
+    out = args[0]
+    for a in args[1:]:
+        if isinstance(out, pd.DataFrame) and np.isscalar(a):
+            out = out.clip(upper=a)
+        elif isinstance(a, pd.DataFrame) and np.isscalar(out):
+            out = a.clip(upper=out)
+        elif isinstance(out, pd.DataFrame) and isinstance(a, pd.DataFrame):
+            out = pd.concat([out.stack(), a.stack()], axis=1).min(axis=1).unstack()
+        else:
+            out = np.minimum(out, a)
+    return out
 
 
 def to_nan(x, value=0, reverse=False):
