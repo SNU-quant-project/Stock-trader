@@ -3,6 +3,7 @@
    기존 components.jsx (MultiLineChart/Icon/AlphaMark) 재사용. */
 
 const fmtKRW = (v) => "₩" + Math.round(v).toLocaleString("ko-KR");
+const fmtKRWs = (v) => (v >= 0 ? "+" : "−") + "₩" + Math.abs(Math.round(v)).toLocaleString("ko-KR");
 const kpct = (v, d = 2) => (v >= 0 ? "+" : "") + Number(v).toFixed(d) + "%";
 
 // KSIC 중분류(2자리) → 읽기 쉬운 업종명 (없으면 코드 표시)
@@ -107,6 +108,51 @@ function PositionsSection({ positions, nPositions, asOf }) {
   );
 }
 
+// 종목별 손익 TOP10 (가장 많이 번/잃은 종목)
+function TopMoversSection({ winners, losers, bookSize }) {
+  const tbl = (list, color, label) => (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color }}>{label}</div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead>
+          <tr style={{ color: "var(--tx-on-light-3)", fontSize: 10.5, textAlign: "left", borderBottom: "1px solid var(--res-line)" }}>
+            <th style={{ padding: "6px 4px", fontWeight: 600 }}>#</th>
+            <th style={{ padding: "6px 4px", fontWeight: 600 }}>종목</th>
+            <th style={{ padding: "6px 4px", fontWeight: 600, textAlign: "right" }}>수익률</th>
+            <th style={{ padding: "6px 4px", fontWeight: 600, textAlign: "right" }}>손익금액</th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.length === 0 && <tr><td colSpan={4} style={{ padding: "14px 4px", color: "var(--tx-on-light-3)" }}>데이터 없음</td></tr>}
+          {list.map((r, i) => (
+            <tr key={r.sym} style={{ borderBottom: "1px solid #f0f2f6" }}>
+              <td style={{ padding: "6px 4px", color: "var(--tx-on-light-3)" }}>{i + 1}</td>
+              <td style={{ padding: "6px 4px" }}>
+                <a href={`https://finance.naver.com/item/main.naver?code=${r.sym}`} target="_blank" rel="noopener noreferrer"
+                   style={{ color: "var(--tx-on-light)", textDecoration: "none", fontWeight: 600 }}
+                   onMouseEnter={(e) => { e.currentTarget.style.color = "var(--cool)"; e.currentTarget.style.textDecoration = "underline"; }}
+                   onMouseLeave={(e) => { e.currentTarget.style.color = "var(--tx-on-light)"; e.currentTarget.style.textDecoration = "none"; }}>{r.name}</a>
+                <span style={{ color: "var(--tx-on-light-3)", fontSize: 10.5, marginLeft: 5 }}>{r.sym}</span>
+              </td>
+              <td className="tabnum" style={{ padding: "6px 4px", textAlign: "right", color: r.ret >= 0 ? "var(--up)" : "var(--down)", fontWeight: 600 }}>{kpct(r.ret, 1)}</td>
+              <td className="tabnum" style={{ padding: "6px 4px", textAlign: "right", color: r.amount >= 0 ? "var(--up)" : "var(--down)", fontWeight: 600 }}>{fmtKRWs(r.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+  return (
+    <KCard style={{ marginBottom: 18 }}>
+      <KTitle sub={`가정 운용금액 ${Math.round(bookSize / 1e8)}억원 기준 · 지난 1년 기여손익(실현+평가)`}>종목별 손익 TOP 10</KTitle>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
+        {tbl(winners, "var(--up)", "🟢 가장 많이 번 종목")}
+        {tbl(losers, "var(--down)", "🔴 가장 많이 잃은 종목")}
+      </div>
+    </KCard>
+  );
+}
+
 function KospiApp() {
   const [d, setD] = React.useState(null);
   const [err, setErr] = React.useState(null);
@@ -136,6 +182,7 @@ function KospiApp() {
           <>
             <AlphaSection alpha={d.alpha} settings={d.settings} />
             <CompareSection compare={d.compare} summary={d.summary} />
+            <TopMoversSection winners={d.winners || []} losers={d.losers || []} bookSize={d.bookSize || 1e8} />
             <PositionsSection positions={d.positions} nPositions={d.nPositions} asOf={d.asOf} />
           </>
         )}

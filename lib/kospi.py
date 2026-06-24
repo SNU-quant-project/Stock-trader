@@ -86,6 +86,28 @@ def build_page_data():
     port_final = float(port_cum.iloc[-1]) if len(port_cum) else 0.0
     kospi_final = float(kospi_cum.dropna().iloc[-1]) if kospi_cum.notna().any() else 0.0
 
+    # --- 종목별 손익 기여 (1년 윈도, 백테스트와 동일 기준: shift(delay), 시가→다음시가) ---
+    BOOK = 100_000_000   # 가정 운용금액 1억원
+    op = panel["open"].unstack(level="symbol")
+    op.index = pd.DatetimeIndex(op.index).normalize()
+    wsh = weights.shift(SETTINGS["delay"]).reindex(index=op.index, columns=op.columns).fillna(0.0)
+    dret = (op.shift(-1) / op - 1.0).replace([np.inf, -np.inf], np.nan).fillna(0.0)
+    contrib = (wsh * dret).reindex(win).fillna(0.0)
+    stock_pl = contrib.sum(axis=0)                                   # 종목별 기여(수익 분수)
+    wwin = wsh.reindex(win)
+    avg_w = wwin.where(wwin > 0).mean(axis=0)                        # 보유 시 평균 비중
+    rows = []
+    for s in stock_pl.index:
+        pl = float(stock_pl[s])
+        aw = avg_w.get(s)
+        if abs(pl) < 1e-12 and (pd.isna(aw) or aw == 0):
+            continue                                                 # 한 번도 안 담긴 종목 제외
+        ret = (pl / aw * 100.0) if (aw is not None and not pd.isna(aw) and aw > 1e-9) else 0.0
+        rows.append({"sym": s, "name": name_map.get(s, s),
+                     "amount": round(pl * BOOK), "ret": round(ret, 2)})
+    winners = sorted(rows, key=lambda r: r["amount"], reverse=True)[:10]
+    losers = sorted(rows, key=lambda r: r["amount"])[:10]
+
     return {
         "alpha": ALPHA,
         "settings": {"Region": "KOR", "Universe": "KOSPI(시총상위 200)", "Delay": 1,
@@ -97,4 +119,5 @@ def build_page_data():
         "summary": {"portfolio1y": round(port_final, 2), "kospi1y": round(kospi_final, 2),
                     "excess1y": round(port_final - kospi_final, 2),
                     "days": len(labels)},
+        "winners": winners, "losers": losers, "bookSize": BOOK,
     }
