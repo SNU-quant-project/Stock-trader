@@ -170,59 +170,103 @@ def _latest_prices():
     return cached("prices", 600, build)
 
 
-def _all_fills():
-    """계정 거래 시작 이후 모든 체결(FILL)을 종목별 매수/매도 현금흐름으로 집계.
-
-    Alpaca Activities REST(`/v2/account/activities`)를 page_token 으로 페이지네이션.
-    반환: (agg, start_date)
-      agg[sym] = {"buy": 매수금액합, "sell": 매도금액합}
-      start_date = 전체에서 가장 이른 체결일 (ISO)
-    """
-    import requests
-    base = "https://paper-api.alpaca.markets"
-    H = {"APCA-API-KEY-ID": os.environ["ALPACA_API_KEY"],
-         "APCA-API-SECRET-KEY": os.environ["ALPACA_SECRET_KEY"]}
-    agg = {}
-    start_date = ""
-    token = None
-    for _ in range(300):  # 안전 상한 (≈30000 체결)
-        params = {"activity_types": "FILL", "page_size": 100}
-        if token:
-            params["page_token"] = token
-        try:
-            acts = requests.get(f"{base}/v2/account/activities", headers=H,
-                                params=params, timeout=25).json()
-        except Exception:
-            break
-        if not isinstance(acts, list) or not acts:
-            break
-        for a in acts:
-            sym = a.get("symbol")
+def _fills_by_symbol():
+    """종목별 체결 시계열 + 최초 체결일. 반환: (fills, start_date)
+      fills[sym] = [(transaction_time, side('buy'|'sell'), qty, price), ...]  시간순(asc)
+    Alpaca Activities REST(FILL)을 페이지네이션. pnl/first_trade 공용이라 캐시(300s)."""
+    def build():
+        import requests
+        base = "https://paper-api.alpaca.markets"
+        H = {"APCA-API-KEY-ID": os.environ["ALPACA_API_KEY"],
+             "APCA-API-SECRET-KEY": os.environ["ALPACA_SECRET_KEY"]}
+        fills = {}
+        start_date = ""
+        token = None
+        for _ in range(300):  # 안전 상한 (≈30000 체결)
+            params = {"activity_types": "FILL", "page_size": 100}
+            if token:
+                params["page_token"] = token
             try:
-                cash = float(a["price"]) * float(a["qty"])
-            except (TypeError, ValueError, KeyError):
-                continue
-            d = agg.setdefault(sym, {"buy": 0.0, "sell": 0.0})
-            if str(a.get("side", "")).lower().startswith("buy"):
-                d["buy"] += cash
+                acts = requests.get(f"{base}/v2/account/activities", headers=H,
+                                    params=params, timeout=25).json()
+            except Exception:
+                break
+            if not isinstance(acts, list) or not acts:
+                break
+            for a in acts:
+                sym = a.get("symbol")
+                try:
+                    qty = float(a["qty"]); price = float(a["price"])
+                except (TypeError, ValueError, KeyError):
+                    continue
+                side = "buy" if str(a.get("side", "")).lower().startswith("buy") else "sell"
+                tt = a.get("transaction_time", "")
+                fills.setdefault(sym, []).append((tt, side, qty, price))
+                if tt and (not start_date or tt < start_date):
+                    start_date = tt
+            token = acts[-1].get("id")
+            if len(acts) < 100 or not token:
+                break
+        for sym in fills:
+            fills[sym].sort(key=lambda x: x[0])  # 시간순
+        return fills, start_date
+    return cached("fills_by_symbol", 300, build)
+
+
+def _attribute_side_pnl(fills, cur):
+    """체결 시계열을 따라가며 롱/숏 '방향별' 손익을 분리한다.
+    반환: (long_pnl, short_pnl, long_basis, short_basis)
+      long_pnl  = 롱 포지션으로 번/잃은 돈(실현+현재 보유 미실현)
+      short_pnl = 숏 포지션으로 번/잃은 돈
+      basis     = 각 방향에 투입한 누적 금액(수익률 분모).
+    부호 있는 포지션(롱+/숏-)을 추적, 청산 시 해당 방향에 실현손익을 귀속."""
+    pos_qty = 0.0    # 부호 있는 현재 포지션
+    pos_cost = 0.0   # 부호 있는 원가 합 (pos_cost/pos_qty = 평단)
+    lp = sp = lb = sb = 0.0
+    for (_, side, qty, price) in fills:
+        signed = qty if side == "buy" else -qty
+        if pos_qty == 0 or (pos_qty > 0) == (signed > 0):
+            pos_cost += signed * price
+            pos_qty += signed
+            if signed > 0:
+                lb += qty * price
             else:
-                d["sell"] += cash
-            tt = a.get("transaction_time", "")
-            if tt and (not start_date or tt < start_date):
-                start_date = tt  # 가장 이른 체결일 (desc 페이징이라 점차 갱신)
-        token = acts[-1].get("id")
-        if len(acts) < 100 or not token:
-            break
-    return agg, start_date
+                sb += qty * price
+        else:
+            avg = pos_cost / pos_qty
+            closing = min(abs(signed), abs(pos_qty))
+            if pos_qty > 0:
+                lp += (price - avg) * closing
+            else:
+                sp += (avg - price) * closing
+            s = 1.0 if pos_qty > 0 else -1.0
+            pos_qty -= s * closing
+            pos_cost = avg * pos_qty if abs(pos_qty) > 1e-9 else 0.0
+            rem = abs(signed) - closing
+            if rem > 1e-9:  # 반전 → 반대 방향 신규 진입
+                ns = 1.0 if signed > 0 else -1.0
+                pos_qty += ns * rem
+                pos_cost += ns * rem * price
+                if ns > 0:
+                    lb += rem * price
+                else:
+                    sb += rem * price
+    # 현재 보유분 미실현 손익을 해당 방향에 귀속
+    if cur and abs(pos_qty) > 1e-9:
+        cpx = cur.get("px") or 0.0
+        avg = pos_cost / pos_qty
+        if pos_qty > 0:
+            lp += (cpx - avg) * pos_qty
+        else:
+            sp += (avg - cpx) * abs(pos_qty)
+    return lp, sp, lb, sb
 
 
 def get_pnl_by_symbol(market_open):
-    """거래 시작 이후 종목별 누적 손익(실현+미실현).
-
-    종목별 총손익 = 매도현금 + 현재포지션가치 - 매수현금
-      (실현분은 매수/매도 현금흐름으로, 미실현분은 현재 포지션 시가평가로 자동 포함.
-       롱/숏 모두 동일 식으로 성립.)
-    현재 포지션 가치: 장중=실시간 market_value, 마감=종가(lastday_price) 기준.
+    """거래 시작 이후 종목·방향(롱/숏)별 누적 손익(실현+미실현).
+    각 종목을 '롱으로 번 돈'/'숏으로 번 돈' 으로 분리 — 현재 보유 여부와 무관하게
+    어느 방향 베팅이 돈을 벌었는지/잃었는지 보여준다.
+    반환 rows: [{sym, name, side('long'|'short'), pl, plpc}]  (pl 내림차순)
     """
     tc = _trading_client()
     cmap = _company_map()
@@ -231,29 +275,22 @@ def get_pnl_by_symbol(market_open):
         for p in tc.get_all_positions():
             qty = float(p.qty)
             if market_open:
-                value = float(p.market_value)
+                px = float(p.current_price or 0)
             else:
                 px = float(p.lastday_price) if p.lastday_price else float(p.current_price or 0)
-                value = px * qty
-            pos[p.symbol] = {"qty": qty, "value": value}
+            pos[p.symbol] = {"qty": qty, "px": px}
     except Exception:
         pass
 
-    agg, start_date = _all_fills()
+    fills, start_date = _fills_by_symbol()
     rows = []
-    for sym in set(agg) | set(pos):
-        a = agg.get(sym, {"buy": 0.0, "sell": 0.0})
-        held = pos.get(sym)
-        value = held["value"] if held else 0.0
-        qty = held["qty"] if held else 0.0
-        pnl = a["sell"] + value - a["buy"]
-        basis = max(a["buy"], a["sell"], 1.0)
-        info = cmap.get(sym, {"name": sym, "sector": "Unknown"})
-        rows.append({
-            "sym": sym, "name": info["name"], "qty": qty,
-            "pl": pnl, "plpc": pnl / basis,
-            "held": abs(qty) > 1e-9,
-        })
+    for sym in set(fills) | set(pos):
+        lp, sp, lb, sb = _attribute_side_pnl(fills.get(sym, []), pos.get(sym))
+        name = cmap.get(sym, {"name": sym})["name"]
+        if lb > 1e-6 or abs(lp) > 1e-6:
+            rows.append({"sym": sym, "name": name, "side": "long", "pl": lp, "plpc": lp / max(lb, 1.0)})
+        if sb > 1e-6 or abs(sp) > 1e-6:
+            rows.append({"sym": sym, "name": name, "side": "short", "pl": sp, "plpc": sp / max(sb, 1.0)})
     rows.sort(key=lambda r: r["pl"], reverse=True)
     return {"rows": rows, "startDate": start_date}
 
@@ -328,32 +365,84 @@ def get_portfolio_history(market_open=False, live_equity=None):
         return [], []
 
 
+def _first_trade_date():
+    """첫 체결일(ET date). SNUQuant 로 실제 거래를 시작한 날 — 그 전 무거래 구간은
+    수익률 비교에서 제외(계좌 개설~첫거래 사이 평평한 구간이 지수 비교를 왜곡하므로)."""
+    def build():
+        _, start_iso = _fills_by_symbol()
+        if not start_iso:
+            return None
+        try:
+            return pd.to_datetime(start_iso, utc=True).tz_convert(ET).date()
+        except Exception:
+            return None
+    return cached("first_trade_date", 1800, build)
+
+
 def _build_benchmark(period):
     """포트폴리오 vs S&P500(^GSPC)·NASDAQ(^IXIC) 동일기간 누적수익률(%) 비교.
-    반환: {labels, dates, series:[{name, values(%), color}]}  (values 는 기간 시작=0% 기준)
+    - 거래 시작일(첫 체결) 이후만 집계 (계좌 개설 시점 아님).
+    - 당일(최근 거래일)을 일별표와 동일하게 intraday 로 보완.
+    반환: {labels, dates, series:[{name, values(%), color}]}  (기간 시작=0% 기준)
     """
     from alpaca.trading.requests import GetPortfolioHistoryRequest
     AP = {"1W": "1W", "1M": "1M", "3M": "3M", "6M": "6M", "1Y": "1A", "ALL": "all"}
-    ap = AP.get(period, "1M")
     tc = _trading_client()
-    h = tc.get_portfolio_history(history_filter=GetPortfolioHistoryRequest(period=ap, timeframe="1D"))
+
+    # 시장 상태 (당일 보완용)
+    market_open, live_equity = False, None
+    try:
+        market_open = bool(tc.get_clock().is_open)
+    except Exception:
+        pass
+    if market_open:
+        try:
+            live_equity = float(tc.get_account().equity)
+        except Exception:
+            pass
+
+    h = tc.get_portfolio_history(history_filter=GetPortfolioHistoryRequest(period=AP.get(period, "1M"), timeframe="1D"))
     df = pd.DataFrame({"ts": pd.to_datetime(h.timestamp, unit="s", utc=True), "equity": h.equity})
     df = df[df["equity"].notna() & (df["equity"] > 0)]
-    if len(df) < 2:
+    if df.empty:
         return {"labels": [], "dates": [], "series": []}
-    # 1D 종가는 00:00 UTC(= 전 거래일 ET 마감) → ET 날짜로 라벨 (포트폴리오 곡선과 동일 규칙)
-    df["d"] = df["ts"].dt.tz_convert(ET).dt.normalize().dt.tz_localize(None)
-    df = df.drop_duplicates("d", keep="last").sort_values("d").reset_index(drop=True)
-    eq = df["equity"].astype(float)
-    port = ((eq / eq.iloc[0] - 1) * 100).round(2).tolist()
-    port_idx = pd.DatetimeIndex(df["d"])
+    # 1D 종가는 00:00 UTC(= 전 거래일 ET 마감) → ET 날짜로 라벨
+    df["d"] = df["ts"].dt.tz_convert(ET).dt.date
+    df = df.drop_duplicates("d", keep="last").sort_values("d")
+    dates = list(df["d"])
+    equities = [float(x) for x in df["equity"]]
+
+    # #2 당일(최근 거래일) 보완 — get_portfolio_history(일별표)와 동일 규칙
+    tcl = _todays_close_from_intraday(tc)
+    if tcl:
+        d, eq = tcl
+        if market_open and live_equity:
+            eq = float(live_equity)
+        if d not in dates:
+            dates.append(d); equities.append(eq)
+        elif market_open and live_equity:
+            equities[-1] = float(live_equity)
+
+    # #1 거래 시작 전(무거래) 구간 제외
+    ts = _first_trade_date()
+    if ts:
+        i0 = next((i for i, d in enumerate(dates) if d >= ts), None)
+        if i0 is not None and len(dates) - i0 >= 2:
+            dates, equities = dates[i0:], equities[i0:]
+
+    if len(dates) < 2:
+        return {"labels": [], "dates": [], "series": []}
+
+    base = equities[0]
+    port = [round((e / base - 1) * 100, 2) for e in equities]
     series = [{"name": "내 포트폴리오", "values": port, "color": "var(--accent)"}]
+    port_idx = pd.DatetimeIndex([pd.Timestamp(d) for d in dates])
 
     # 인덱스 동일 구간 종가 → 거래일 정렬 후 누적%
     try:
         import yfinance as yf
-        start = port_idx[0].date().isoformat()
-        end = (port_idx[-1] + pd.Timedelta(days=4)).date().isoformat()
+        start = dates[0].isoformat()
+        end = (dates[-1] + timedelta(days=4)).isoformat()
         bench = [("^GSPC", "S&P 500", "#2f7ce0"), ("^IXIC", "NASDAQ", "#e0792f")]
         ydata = yf.download([b[0] for b in bench], start=start, end=end, interval="1d",
                             auto_adjust=True, progress=False, group_by="ticker", threads=True)
@@ -366,8 +455,8 @@ def _build_benchmark(period):
                 valid = aligned.dropna()
                 if valid.empty:
                     continue
-                base = float(valid.iloc[0])
-                vals = [round(float(x / base - 1) * 100, 2) if pd.notna(x) else None for x in aligned]
+                b0 = float(valid.iloc[0])
+                vals = [round(float(x / b0 - 1) * 100, 2) if pd.notna(x) else None for x in aligned]
                 series.append({"name": label, "values": vals, "color": color})
             except Exception:
                 continue
@@ -375,8 +464,8 @@ def _build_benchmark(period):
         pass
 
     fmt = "%m/%d" if os.name == "nt" else "%-m/%-d"
-    labels = [d.strftime(fmt) for d in port_idx]
-    return {"labels": labels, "dates": [d.date().isoformat() for d in port_idx], "series": series}
+    labels = [d.strftime(fmt) for d in dates]
+    return {"labels": labels, "dates": [d.isoformat() for d in dates], "series": series}
 
 
 # ============ 시장 지수 (yfinance) ============
