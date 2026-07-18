@@ -1,0 +1,18 @@
+[Unit]
+Description=Stock Trader EOD model and beta training
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/stock-trader
+EnvironmentFile=/etc/stock-trader/stock-trader.env
+ExecStart=/opt/stock-trader/.venv/bin/python -u live_trade.py --train-eod
+TimeoutStartSec=6h
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

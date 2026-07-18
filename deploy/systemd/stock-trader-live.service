@@ -1,0 +1,21 @@
+[Unit]
+Description=Stock Trader live loop (dry-run by default)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/stock-trader
+EnvironmentFile=/etc/stock-trader/stock-trader.env
+ExecStart=/opt/stock-trader/.venv/bin/python -u live_trade.py --loop
+Restart=always
+RestartSec=60
+KillSignal=SIGINT
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

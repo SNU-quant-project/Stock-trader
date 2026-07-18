@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Stock Trader EOD training after US market close
+
+[Timer]
+# Assumes the EC2 host timezone is America/New_York.
+OnCalendar=Mon..Fri 16:45:00
+Persistent=true
+Unit=stock-trader-eod-train.service
+
+[Install]
+WantedBy=timers.target

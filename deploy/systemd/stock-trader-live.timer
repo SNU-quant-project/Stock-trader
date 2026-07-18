@@ -1,0 +1,11 @@
+[Unit]
+Description=Start Stock Trader live loop before US regular market
+
+[Timer]
+# Assumes the EC2 host timezone is America/New_York.
+OnCalendar=Mon..Fri 09:20:00
+Persistent=true
+Unit=stock-trader-live.service
+
+[Install]
+WantedBy=timers.target
